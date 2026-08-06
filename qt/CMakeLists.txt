@@ -14,10 +14,14 @@ find_package(KF6GlobalAccel QUIET)
 include(cmake/Ghostty.cmake)
 
 qt_add_library(qhostty_frontend STATIC
+  src/CommandPalette.cpp
+  src/CommandPalette.h
   src/FramePresenter.cpp
   src/FramePresenter.h
   src/GhosttyApp.cpp
   src/GhosttyApp.h
+  src/InspectorWindow.cpp
+  src/InspectorWindow.h
   src/GlobalShortcuts.cpp
   src/GlobalShortcuts.h
   src/MainWindow.cpp
