@@ -653,8 +653,13 @@ pub fn add(
         }
     }
 
-    // If we're building an exe then we have additional dependencies.
-    if (step.kind != .lib) {
+    // Executables and the embedded OpenGL library provide their own GL
+    // loader. libghostty-vt does not use the renderer and does not need Glad.
+    const embedded_opengl = step.kind == .lib and
+        self.config.app_runtime == .none and
+        !self.config.emit_lib_vt and
+        self.config.renderer == .opengl;
+    if (step.kind != .lib or embedded_opengl) {
         // We always statically compile glad
         step.root_module.addIncludePath(b.path("vendor/glad/include/"));
         step.root_module.addCSourceFile(.{
@@ -662,15 +667,18 @@ pub fn add(
             .flags = &.{},
         });
 
-        // Link EGL for GTK.
-        if (self.config.app_runtime == .gtk) {
+        // Link EGL for GTK and embedded hosts.
+        if (self.config.app_runtime == .gtk or embedded_opengl) {
             step.root_module.addCSourceFile(.{
                 .file = b.path("vendor/glad/src/glad_egl.c"),
                 .flags = &.{},
             });
             step.root_module.linkSystemLibrary("egl", dynamic_link_opts);
         }
+    }
 
+    // If we're building an exe then we have additional dependencies.
+    if (step.kind != .lib) {
         // When we're targeting flatpak we ALWAYS link GTK so we
         // get access to glib for dbus.
         if (self.config.flatpak) {
