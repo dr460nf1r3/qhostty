@@ -134,6 +134,12 @@ pub export fn ghostty_init(argc: usize, argv: [*][*:0]u8) c_int {
     return 0;
 }
 
+/// Reload the process environment. Call this after the host changes the
+/// environment, for example with setenv or unsetenv.
+pub export fn ghostty_sync_environ() void {
+    global.syncEnviron();
+}
+
 /// Runs an action if it is specified. If there is no action this returns
 /// false. If there is an action then this doesn't return.
 pub export fn ghostty_cli_try_action() void {

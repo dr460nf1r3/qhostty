@@ -987,6 +987,8 @@ void TerminalWidget::createSurface() {
   m_config.initial_input =
       m_initialInputUtf8.isEmpty() ? nullptr : m_initialInputUtf8.constData();
 
+  // Qt can change the environment, for example when it activates a window.
+  ghostty_sync_environ();
   m_surface = ghostty_surface_new(m_app->handle(), &m_config);
   if (m_surface == nullptr) {
     qCritical("Failed to create Ghostty surface");
