@@ -1,0 +1,667 @@
+#include "TerminalWidget.h"
+
+#include "GhosttyApp.h"
+
+#include <QApplication>
+#include <QCheckBox>
+#include <QClipboard>
+#include <QDesktopServices>
+#include <QFocusEvent>
+#include <QGuiApplication>
+#include <QHideEvent>
+#include <QInputMethodEvent>
+#include <QKeyEvent>
+#include <QMessageBox>
+#include <QMimeData>
+#include <QMouseEvent>
+#include <QOpenGLContext>
+#include <QShowEvent>
+#include <QUrl>
+#include <QWheelEvent>
+#include <QWindow>
+
+#include <algorithm>
+#include <cmath>
+#include <cstring>
+#include <vector>
+
+TerminalWidget::TerminalWidget(GhosttyApp* app,
+                               QWidget* parent,
+                               const ghostty_surface_config_s* baseConfig)
+    : QOpenGLWidget(parent), m_app(app) {
+  setObjectName(QStringLiteral("qhostty-terminal"));
+  setFocusPolicy(Qt::StrongFocus);
+  setMouseTracking(true);
+  setAttribute(Qt::WA_InputMethodEnabled, true);
+  setUpdateBehavior(QOpenGLWidget::NoPartialUpdate);
+
+  m_config = baseConfig != nullptr ? *baseConfig : ghostty_surface_config_new();
+  m_app->registerSurface(this);
+}
+
+TerminalWidget::~TerminalWidget() {
+  destroySurface();
+  m_app->unregisterSurface(this);
+}
+
+ghostty_clipboard_read_result_e TerminalWidget::readClipboard(
+    ghostty_clipboard_e location,
+    void* state,
+    const char* const* mimes,
+    size_t mimeCount,
+    bool list) {
+  if (m_surface == nullptr) {
+    return GHOSTTY_CLIPBOARD_READ_UNAVAILABLE;
+  }
+
+  QClipboard* clipboard = QGuiApplication::clipboard();
+  const QClipboard::Mode mode =
+      location == GHOSTTY_CLIPBOARD_SELECTION && clipboard->supportsSelection()
+          ? QClipboard::Selection
+          : QClipboard::Clipboard;
+  const QMimeData* mime = clipboard->mimeData(mode);
+  if (mime == nullptr) {
+    return GHOSTTY_CLIPBOARD_READ_UNAVAILABLE;
+  }
+
+  std::vector<QByteArray> types;
+  std::vector<QByteArray> data;
+  for (size_t index = 0; index < mimeCount; ++index) {
+    const QByteArray type(mimes[index]);
+    if (type == "text/plain") {
+      if (mime->hasText()) {
+        types.push_back(type);
+        data.push_back(mime->text().toUtf8());
+      }
+    } else if (mime->hasFormat(QString::fromUtf8(type))) {
+      types.push_back(type);
+      data.push_back(mime->data(QString::fromUtf8(type)));
+    }
+  }
+
+  std::vector<QByteArray> formats;
+  if (list) {
+    for (const QString& format : mime->formats()) {
+      formats.push_back(format.toUtf8());
+    }
+    if (mime->hasText()) {
+      formats.emplace_back("text/plain");
+    }
+  }
+  if (data.empty() && formats.empty()) {
+    return GHOSTTY_CLIPBOARD_READ_UNAVAILABLE;
+  }
+
+  std::vector<ghostty_clipboard_content_s> contents;
+  for (size_t index = 0; index < data.size(); ++index) {
+    contents.push_back({types[index].constData(), data[index].constData(),
+                        static_cast<size_t>(data[index].size())});
+  }
+  std::vector<const char*> available;
+  for (const QByteArray& format : formats) {
+    available.push_back(format.constData());
+  }
+
+  ghostty_clipboard_complete_s complete{};
+  complete.contents = contents.data();
+  complete.contents_len = contents.size();
+  complete.available = available.data();
+  complete.available_len = available.size();
+  ghostty_surface_complete_clipboard_request(m_surface, &complete, state);
+  return GHOSTTY_CLIPBOARD_READ_STARTED;
+}
+
+void TerminalWidget::confirmReadClipboard(
+    const ghostty_clipboard_confirm_s* confirm,
+    void* state,
+    ghostty_clipboard_request_e request) {
+  if (m_surface == nullptr) {
+    return;
+  }
+
+  QString operation;
+  switch (request) {
+    case GHOSTTY_CLIPBOARD_REQUEST_PASTE:
+      operation = tr("Paste clipboard contents into the terminal?");
+      break;
+    case GHOSTTY_CLIPBOARD_REQUEST_OSC_52_WRITE:
+    case GHOSTTY_CLIPBOARD_REQUEST_KITTY_WRITE:
+      operation = tr("Allow the terminal to write to the clipboard?");
+      break;
+    default:
+      operation = tr("Allow the terminal to read the clipboard?");
+      break;
+  }
+  if (confirm->name != nullptr) {
+    operation = tr("Request from %1").arg(QString::fromUtf8(confirm->name)) +
+                QStringLiteral("\n") + operation;
+  }
+
+  QString preview;
+  for (size_t index = 0; index < confirm->contents_len; ++index) {
+    const ghostty_clipboard_content_s& content = confirm->contents[index];
+    if (content.mime != nullptr && std::strcmp(content.mime, "text/plain") == 0) {
+      preview = QString::fromUtf8(content.data,
+                                  static_cast<qsizetype>(content.len));
+      break;
+    }
+  }
+
+  QMessageBox box(QMessageBox::Question, tr("Clipboard confirmation"),
+                  operation + QStringLiteral("\n\n") + preview.left(500),
+                  QMessageBox::Yes | QMessageBox::No, this);
+  box.setDefaultButton(QMessageBox::No);
+  if (confirm->can_remember) {
+    box.setCheckBox(new QCheckBox(tr("Remember for this session")));
+  }
+
+  if (box.exec() != QMessageBox::Yes) {
+    ghostty_surface_deny_clipboard_request(m_surface, state);
+    return;
+  }
+
+  ghostty_clipboard_complete_s complete{};
+  complete.contents = confirm->contents;
+  complete.contents_len = confirm->contents_len;
+  complete.available = confirm->available;
+  complete.available_len = confirm->available_len;
+  complete.confirmed = true;
+  complete.remember = box.checkBox() != nullptr && box.checkBox()->isChecked();
+  ghostty_surface_complete_clipboard_request(m_surface, &complete, state);
+}
+
+void TerminalWidget::writeClipboard(ghostty_clipboard_e location,
+                                    const ghostty_clipboard_content_s* contents,
+                                    size_t count,
+                                    bool confirm) {
+  if (contents == nullptr || count == 0) {
+    return;
+  }
+
+  QString plainText;
+  for (size_t index = 0; index < count; ++index) {
+    if (contents[index].mime != nullptr && contents[index].data != nullptr &&
+        std::strcmp(contents[index].mime, "text/plain") == 0) {
+      plainText =
+          QString::fromUtf8(contents[index].data,
+                            static_cast<qsizetype>(contents[index].len));
+      break;
+    }
+  }
+
+  if (confirm) {
+    const auto answer = QMessageBox::question(
+        this, tr("Clipboard confirmation"),
+        tr("Allow the terminal to write to the clipboard?\n\n%1")
+            .arg(plainText.left(500)),
+        QMessageBox::Yes | QMessageBox::No, QMessageBox::No);
+    if (answer != QMessageBox::Yes) {
+      return;
+    }
+  }
+
+  auto* mime = new QMimeData();
+  for (size_t index = 0; index < count; ++index) {
+    if (contents[index].mime == nullptr || contents[index].data == nullptr) {
+      continue;
+    }
+
+    const QByteArray type(contents[index].mime);
+    const QByteArray data(contents[index].data,
+                          static_cast<qsizetype>(contents[index].len));
+    if (type == "text/plain") {
+      mime->setText(QString::fromUtf8(data));
+    } else if (type == "text/html") {
+      mime->setHtml(QString::fromUtf8(data));
+    } else {
+      mime->setData(type, data);
+    }
+  }
+
+  QClipboard* clipboard = QGuiApplication::clipboard();
+  const QClipboard::Mode mode =
+      location == GHOSTTY_CLIPBOARD_SELECTION && clipboard->supportsSelection()
+          ? QClipboard::Selection
+          : QClipboard::Clipboard;
+  clipboard->setMimeData(mime, mode);
+}
+
+void TerminalWidget::requestClose(bool processAlive) {
+  if (processAlive && m_surface != nullptr &&
+      ghostty_surface_needs_confirm_quit(m_surface)) {
+    const auto answer = QMessageBox::question(
+        this, tr("Close terminal?"),
+        tr("A process is still running in this terminal."),
+        QMessageBox::Close | QMessageBox::Cancel, QMessageBox::Cancel);
+    if (answer != QMessageBox::Close) {
+      return;
+    }
+  }
+
+  emit closeRequested(this);
+}
+
+bool TerminalWidget::handleAction(const ghostty_action_s& action) {
+  switch (action.tag) {
+    case GHOSTTY_ACTION_RENDER:
+      update();
+      return true;
+    case GHOSTTY_ACTION_SET_TITLE:
+      m_title = QString::fromUtf8(action.action.set_title.title);
+      emit titleChanged(m_title);
+      return true;
+    case GHOSTTY_ACTION_SET_TAB_TITLE:
+      m_title = QString::fromUtf8(action.action.set_tab_title.title);
+      emit titleChanged(m_title);
+      return true;
+    case GHOSTTY_ACTION_PWD:
+      m_workingDirectory = QString::fromUtf8(action.action.pwd.pwd);
+      return true;
+    case GHOSTTY_ACTION_CELL_SIZE:
+      m_cellSize = QSize(static_cast<int>(action.action.cell_size.width),
+                         static_cast<int>(action.action.cell_size.height));
+      return true;
+    case GHOSTTY_ACTION_SIZE_LIMIT: {
+      const qreal scale = std::max<qreal>(1.0, devicePixelRatioF());
+      setMinimumSize(qCeil(action.action.size_limit.min_width / scale),
+                     qCeil(action.action.size_limit.min_height / scale));
+      if (action.action.size_limit.max_width > 0 &&
+          action.action.size_limit.max_height > 0) {
+        setMaximumSize(qFloor(action.action.size_limit.max_width / scale),
+                       qFloor(action.action.size_limit.max_height / scale));
+      }
+      return true;
+    }
+    case GHOSTTY_ACTION_INITIAL_SIZE: {
+      if (window() != nullptr) {
+        const qreal scale = std::max<qreal>(1.0, devicePixelRatioF());
+        window()->resize(qCeil(action.action.initial_size.width / scale),
+                         qCeil(action.action.initial_size.height / scale));
+      }
+      return true;
+    }
+    case GHOSTTY_ACTION_MOUSE_SHAPE:
+      setMouseShape(action.action.mouse_shape);
+      return true;
+    case GHOSTTY_ACTION_MOUSE_VISIBILITY:
+      setMouseVisible(action.action.mouse_visibility == GHOSTTY_MOUSE_VISIBLE);
+      return true;
+    case GHOSTTY_ACTION_PRESENT_TERMINAL:
+      setFocus(Qt::OtherFocusReason);
+      return true;
+    case GHOSTTY_ACTION_RING_BELL:
+      QApplication::beep();
+      emit bellRang();
+      return true;
+    case GHOSTTY_ACTION_OPEN_URL: {
+      const auto& url = action.action.open_url;
+      return QDesktopServices::openUrl(
+          QUrl(QString::fromUtf8(url.url, static_cast<qsizetype>(url.len))));
+    }
+    case GHOSTTY_ACTION_COPY_TITLE_TO_CLIPBOARD:
+      QGuiApplication::clipboard()->setText(m_title);
+      return true;
+    case GHOSTTY_ACTION_CLOSE_WINDOW:
+      emit closeRequested(this);
+      return true;
+    case GHOSTTY_ACTION_RENDERER_HEALTH:
+      setEnabled(action.action.renderer_health ==
+                 GHOSTTY_RENDERER_HEALTH_HEALTHY);
+      return true;
+    case GHOSTTY_ACTION_SELECTION_CHANGED:
+    case GHOSTTY_ACTION_COLOR_CHANGE:
+    case GHOSTTY_ACTION_SCROLLBAR:
+    case GHOSTTY_ACTION_PROGRESS_REPORT:
+    case GHOSTTY_ACTION_COMMAND_FINISHED:
+    case GHOSTTY_ACTION_READONLY:
+      return true;
+    default:
+      return false;
+  }
+}
+
+void TerminalWidget::initializeGL() {
+  connect(context(), &QOpenGLContext::aboutToBeDestroyed, this,
+          &TerminalWidget::cleanupContext,
+          static_cast<Qt::ConnectionType>(Qt::DirectConnection |
+                                          Qt::UniqueConnection));
+
+  const bool dmabuf = m_presenter.initialize(context());
+  m_contextRealized = true;
+  const bool recreated = m_surface != nullptr;
+  if (m_surface == nullptr) {
+    // Ghostty makes its own context current while it creates the surface.
+    doneCurrent();
+    createSurface();
+    makeCurrent();
+  }
+  if (m_surface != nullptr) {
+    ghostty_surface_report_presentation_health(
+        m_surface, dmabuf ? GHOSTTY_RENDERER_HEALTH_HEALTHY
+                          : GHOSTTY_RENDERER_HEALTH_UNHEALTHY);
+    if (recreated) {
+      requestFrame();
+    }
+  }
+
+  syncSurfaceMetrics();
+}
+
+void TerminalWidget::paintGL() {
+  if (m_surface == nullptr || !m_contextRealized) {
+    return;
+  }
+
+  ghostty_frame_s frame{};
+  if (ghostty_surface_take_frame(m_surface, &frame) &&
+      !m_presenter.update(frame)) {
+    qWarning("Cannot import a DMABUF frame, using CPU frames");
+    ghostty_surface_report_presentation_health(
+        m_surface, GHOSTTY_RENDERER_HEALTH_UNHEALTHY);
+    requestFrame();
+  }
+
+  const qreal scale = devicePixelRatioF();
+  m_presenter.paint(defaultFramebufferObject(),
+                    QSize(qRound(width() * scale), qRound(height() * scale)));
+}
+
+void TerminalWidget::resizeGL(int, int) {
+  syncSurfaceMetrics();
+}
+
+void TerminalWidget::keyPressEvent(QKeyEvent* event) {
+  const ghostty_input_action_e action =
+      event->isAutoRepeat() ? GHOSTTY_ACTION_REPEAT : GHOSTTY_ACTION_PRESS;
+  if (sendKey(event, action)) {
+    event->accept();
+  } else {
+    QOpenGLWidget::keyPressEvent(event);
+  }
+}
+
+void TerminalWidget::keyReleaseEvent(QKeyEvent* event) {
+  if (sendKey(event, GHOSTTY_ACTION_RELEASE)) {
+    event->accept();
+  } else {
+    QOpenGLWidget::keyReleaseEvent(event);
+  }
+}
+
+void TerminalWidget::inputMethodEvent(QInputMethodEvent* event) {
+  if (m_surface == nullptr) {
+    return;
+  }
+
+  const QByteArray preedit = event->preeditString().toUtf8();
+  m_composing = !preedit.isEmpty();
+  ghostty_surface_preedit(m_surface, preedit.constData(),
+                          static_cast<uintptr_t>(preedit.size()));
+
+  const QByteArray commit = event->commitString().toUtf8();
+  if (!commit.isEmpty()) {
+    ghostty_surface_text(m_surface, commit.constData(),
+                         static_cast<uintptr_t>(commit.size()));
+  }
+  event->accept();
+}
+
+QVariant TerminalWidget::inputMethodQuery(Qt::InputMethodQuery query) const {
+  if (query == Qt::ImCursorRectangle && m_surface != nullptr) {
+    double x = 0;
+    double y = 0;
+    double width = 0;
+    double height = 0;
+    ghostty_surface_ime_point(m_surface, &x, &y, &width, &height);
+    const qreal scale = std::max<qreal>(1.0, devicePixelRatioF());
+    return QRectF(x / scale, y / scale, width / scale, height / scale);
+  }
+
+  return QOpenGLWidget::inputMethodQuery(query);
+}
+
+void TerminalWidget::mouseMoveEvent(QMouseEvent* event) {
+  sendMousePosition(event->position(), event->modifiers());
+  event->accept();
+}
+
+void TerminalWidget::mousePressEvent(QMouseEvent* event) {
+  if (m_surface != nullptr) {
+    sendMousePosition(event->position(), event->modifiers());
+    ghostty_surface_mouse_button(m_surface, GHOSTTY_MOUSE_PRESS,
+                                 mouseButton(event->button()),
+                                 modifiers(event->modifiers()));
+  }
+  setFocus(Qt::MouseFocusReason);
+  event->accept();
+}
+
+void TerminalWidget::mouseReleaseEvent(QMouseEvent* event) {
+  if (m_surface != nullptr) {
+    sendMousePosition(event->position(), event->modifiers());
+    ghostty_surface_mouse_button(m_surface, GHOSTTY_MOUSE_RELEASE,
+                                 mouseButton(event->button()),
+                                 modifiers(event->modifiers()));
+  }
+  event->accept();
+}
+
+void TerminalWidget::wheelEvent(QWheelEvent* event) {
+  if (m_surface == nullptr) {
+    return;
+  }
+
+  const QPoint pixel = event->pixelDelta();
+  const bool precise = !pixel.isNull();
+  const QPointF delta =
+      precise ? QPointF(pixel) : QPointF(event->angleDelta()) / 120.0;
+  const ghostty_input_scroll_mods_t scrollMods = precise ? 1 : 0;
+  ghostty_surface_mouse_scroll(m_surface, delta.x(), delta.y(), scrollMods);
+  event->accept();
+}
+
+void TerminalWidget::focusInEvent(QFocusEvent* event) {
+  if (m_surface != nullptr) {
+    ghostty_surface_set_focus(m_surface, true);
+  }
+  QOpenGLWidget::focusInEvent(event);
+}
+
+void TerminalWidget::focusOutEvent(QFocusEvent* event) {
+  if (m_surface != nullptr) {
+    ghostty_surface_set_focus(m_surface, false);
+  }
+  QOpenGLWidget::focusOutEvent(event);
+}
+
+void TerminalWidget::showEvent(QShowEvent* event) {
+  if (m_surface != nullptr) {
+    ghostty_surface_set_occlusion(m_surface, true);
+  }
+  QOpenGLWidget::showEvent(event);
+}
+
+void TerminalWidget::hideEvent(QHideEvent* event) {
+  if (m_surface != nullptr) {
+    ghostty_surface_set_occlusion(m_surface, false);
+  }
+  QOpenGLWidget::hideEvent(event);
+}
+
+bool TerminalWidget::event(QEvent* event) {
+  if (event->type() == QEvent::DevicePixelRatioChange && m_surface != nullptr) {
+    syncSurfaceMetrics();
+  }
+  return QOpenGLWidget::event(event);
+}
+
+void TerminalWidget::cleanupContext() {
+  if (!m_contextRealized || context() == nullptr) {
+    return;
+  }
+
+  makeCurrent();
+  m_presenter.release();
+  m_contextRealized = false;
+  doneCurrent();
+}
+
+void TerminalWidget::createSurface() {
+  m_config.platform_tag = GHOSTTY_PLATFORM_EGL;
+  m_config.platform.egl.display = FramePresenter::eglDisplay(context());
+  m_config.userdata = this;
+  m_config.scale_factor = devicePixelRatioF();
+
+  m_surface = ghostty_surface_new(m_app->handle(), &m_config);
+  if (m_surface == nullptr) {
+    qCritical("Failed to create Ghostty surface");
+  }
+}
+
+void TerminalWidget::destroySurface() {
+  if (m_contextRealized && context() != nullptr && context()->isValid()) {
+    makeCurrent();
+    m_presenter.release();
+    doneCurrent();
+  }
+  m_contextRealized = false;
+
+  if (m_surface == nullptr) {
+    return;
+  }
+
+  ghostty_surface_free(m_surface);
+  m_surface = nullptr;
+}
+
+void TerminalWidget::requestFrame() {
+  // The renderer draws a full frame when the surface becomes visible.
+  ghostty_surface_set_occlusion(m_surface, false);
+  ghostty_surface_set_occlusion(m_surface, isVisible());
+}
+
+void TerminalWidget::syncSurfaceMetrics() {
+  if (m_surface == nullptr) {
+    return;
+  }
+
+  const qreal scale = std::max<qreal>(1.0, devicePixelRatioF());
+  ghostty_surface_set_content_scale(m_surface, scale, scale);
+  ghostty_surface_set_size(m_surface, qRound(width() * scale),
+                           qRound(height() * scale));
+}
+
+bool TerminalWidget::sendKey(QKeyEvent* event, ghostty_input_action_e action) {
+  if (m_surface == nullptr) {
+    return false;
+  }
+
+  const QByteArray text = event->text().toUtf8();
+  ghostty_input_key_s key{};
+  key.action = action;
+  key.mods = modifiers(event->modifiers());
+  key.consumed_mods = GHOSTTY_MODS_NONE;
+  key.keycode = event->nativeScanCode();
+  key.text = text.isEmpty() ? nullptr : text.constData();
+  key.unshifted_codepoint = 0;
+  key.composing = m_composing;
+  return ghostty_surface_key(m_surface, key);
+}
+
+void TerminalWidget::sendMousePosition(
+    const QPointF& position,
+    Qt::KeyboardModifiers keyboardModifiers) {
+  if (m_surface != nullptr) {
+    ghostty_surface_mouse_pos(m_surface, position.x(), position.y(),
+                              modifiers(keyboardModifiers));
+  }
+}
+
+void TerminalWidget::setMouseShape(ghostty_action_mouse_shape_e shape) {
+  switch (shape) {
+    case GHOSTTY_MOUSE_SHAPE_TEXT:
+      setCursor(Qt::IBeamCursor);
+      break;
+    case GHOSTTY_MOUSE_SHAPE_POINTER:
+      setCursor(Qt::PointingHandCursor);
+      break;
+    case GHOSTTY_MOUSE_SHAPE_CROSSHAIR:
+      setCursor(Qt::CrossCursor);
+      break;
+    case GHOSTTY_MOUSE_SHAPE_GRAB:
+      setCursor(Qt::OpenHandCursor);
+      break;
+    case GHOSTTY_MOUSE_SHAPE_GRABBING:
+      setCursor(Qt::ClosedHandCursor);
+      break;
+    case GHOSTTY_MOUSE_SHAPE_NOT_ALLOWED:
+    case GHOSTTY_MOUSE_SHAPE_NO_DROP:
+      setCursor(Qt::ForbiddenCursor);
+      break;
+    case GHOSTTY_MOUSE_SHAPE_EW_RESIZE:
+    case GHOSTTY_MOUSE_SHAPE_COL_RESIZE:
+      setCursor(Qt::SizeHorCursor);
+      break;
+    case GHOSTTY_MOUSE_SHAPE_NS_RESIZE:
+    case GHOSTTY_MOUSE_SHAPE_ROW_RESIZE:
+      setCursor(Qt::SizeVerCursor);
+      break;
+    case GHOSTTY_MOUSE_SHAPE_NESW_RESIZE:
+      setCursor(Qt::SizeBDiagCursor);
+      break;
+    case GHOSTTY_MOUSE_SHAPE_NWSE_RESIZE:
+      setCursor(Qt::SizeFDiagCursor);
+      break;
+    case GHOSTTY_MOUSE_SHAPE_WAIT:
+    case GHOSTTY_MOUSE_SHAPE_PROGRESS:
+      setCursor(Qt::WaitCursor);
+      break;
+    default:
+      setCursor(Qt::ArrowCursor);
+      break;
+  }
+}
+
+void TerminalWidget::setMouseVisible(bool visible) {
+  if (visible) {
+    unsetCursor();
+  } else {
+    setCursor(Qt::BlankCursor);
+  }
+}
+
+ghostty_input_mods_e TerminalWidget::modifiers(
+    Qt::KeyboardModifiers keyboardModifiers) {
+  int result = GHOSTTY_MODS_NONE;
+  if (keyboardModifiers.testFlag(Qt::ShiftModifier)) {
+    result |= GHOSTTY_MODS_SHIFT;
+  }
+  if (keyboardModifiers.testFlag(Qt::ControlModifier)) {
+    result |= GHOSTTY_MODS_CTRL;
+  }
+  if (keyboardModifiers.testFlag(Qt::AltModifier)) {
+    result |= GHOSTTY_MODS_ALT;
+  }
+  if (keyboardModifiers.testFlag(Qt::MetaModifier)) {
+    result |= GHOSTTY_MODS_SUPER;
+  }
+  return static_cast<ghostty_input_mods_e>(result);
+}
+
+ghostty_input_mouse_button_e TerminalWidget::mouseButton(
+    Qt::MouseButton button) {
+  switch (button) {
+    case Qt::LeftButton:
+      return GHOSTTY_MOUSE_LEFT;
+    case Qt::RightButton:
+      return GHOSTTY_MOUSE_RIGHT;
+    case Qt::MiddleButton:
+      return GHOSTTY_MOUSE_MIDDLE;
+    case Qt::BackButton:
+      return GHOSTTY_MOUSE_FOUR;
+    case Qt::ForwardButton:
+      return GHOSTTY_MOUSE_FIVE;
+    default:
+      return GHOSTTY_MOUSE_UNKNOWN;
+  }
+}
