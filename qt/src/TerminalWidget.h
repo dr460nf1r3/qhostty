@@ -74,6 +74,7 @@ class TerminalWidget final : public QOpenGLWidget {
   void titleChanged(const QString& title);
   void tabTitleChanged(const QString& title);
   void closeRequested(TerminalWidget* widget);
+  void configChanged(ghostty_config_t config);
   void bellRang();
   void surfaceClosing();
 
