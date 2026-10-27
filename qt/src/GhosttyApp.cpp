@@ -258,6 +258,26 @@ bool GhosttyApp::reloadConfig(TerminalWidget* widget, bool soft) {
   return true;
 }
 
+void GhosttyApp::openConfigInWindow(const QString& path) {
+  QString editor = qEnvironmentVariable("VISUAL");
+  if (editor.isEmpty()) {
+    editor = qEnvironmentVariable("EDITOR");
+  }
+  if (editor.isEmpty()) {
+    editor = QStringLiteral("vi");
+  }
+
+  QString quoted = path;
+  quoted.replace(QLatin1Char('\''), QStringLiteral("'\\''"));
+  const QByteArray command =
+      (editor + QStringLiteral(" '") + quoted + QLatin1Char('\'')).toUtf8();
+
+  ghostty_surface_config_s config = ghostty_surface_config_new();
+  config.command = command.constData();
+  config.context = GHOSTTY_SURFACE_CONTEXT_WINDOW;
+  createWindow(&config);
+}
+
 MainWindow* GhosttyApp::createWindow(
     const ghostty_surface_config_s* baseConfig) {
   auto* window = new MainWindow(this, nullptr, baseConfig);
@@ -510,12 +530,18 @@ bool GhosttyApp::handleAction(ghostty_target_s target,
     }
     case GHOSTTY_ACTION_OPEN_CONFIG: {
       const ghostty_string_s path = ghostty_config_open_path();
-      if (path.ptr != nullptr) {
-        const QString value =
-            QString::fromUtf8(path.ptr, static_cast<qsizetype>(path.len));
-        QDesktopServices::openUrl(QUrl::fromLocalFile(value));
-      }
+      const QString value =
+          path.ptr == nullptr
+              ? QString()
+              : QString::fromUtf8(path.ptr, static_cast<qsizetype>(path.len));
       ghostty_string_free(path);
+      if (value.isEmpty()) {
+        return false;
+      }
+      if (action.action.open_config == GHOSTTY_ACTION_OPEN_CONFIG_OS_OPEN) {
+        return QDesktopServices::openUrl(QUrl::fromLocalFile(value));
+      }
+      openConfigInWindow(value);
       return true;
     }
     case GHOSTTY_ACTION_RELOAD_CONFIG:

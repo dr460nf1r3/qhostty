@@ -12,6 +12,7 @@
 #include <QApplication>
 #include <QLabel>
 #include <QMenu>
+#include <QPointer>
 #include <QProgressBar>
 #include <QScrollBar>
 #include <QStackedWidget>
@@ -84,7 +85,50 @@ class WindowActionsTest final : public QObject {
   void mapsMouseCoordinates();
   void keepsTabAsTerminalInput();
   void controlsTabBarVisibility();
+  void routesWindowActions();
 };
+
+void WindowActionsTest::routesWindowActions() {
+  GhosttyApp ghostty;
+  QVERIFY(ghostty.initialize());
+  MainWindow window(&ghostty);
+  TerminalWidget* source = window.currentTab()->activeTerminal();
+  QVERIFY(source != nullptr);
+  const QString tabTitle = window.windowTitle();
+
+  ghostty_action_s action{};
+  action.tag = GHOSTTY_ACTION_SET_WINDOW_TITLE;
+  action.action.set_title.title = "Build";
+  QVERIFY(window.handleAction(source, action).value_or(false));
+  QCOMPARE(window.windowTitle(), QStringLiteral("Build"));
+  action.action.set_title.title = "";
+  QVERIFY(window.handleAction(source, action).value_or(false));
+  QCOMPARE(window.windowTitle(), tabTitle);
+
+  action = {};
+  action.tag = GHOSTTY_ACTION_RESIZE_WINDOW;
+  action.action.resize_window = {0, 0};
+  QVERIFY(window.handleAction(source, action).value_or(false));
+
+  window.addTab();
+  auto* tabBar = window.findChild<QTabBar*>(QStringLiteral("qhostty-tabs"));
+  QVERIFY(tabBar != nullptr);
+  QCOMPARE(tabBar->count(), 2);
+  action = {};
+  action.tag = GHOSTTY_ACTION_MOVE_TAB_TO_NEW_WINDOW;
+  QVERIFY(window.handleAction(window.currentTab()->activeTerminal(), action)
+              .value_or(false));
+  QCOMPARE(tabBar->count(), 1);
+  QList<QPointer<MainWindow>> detached;
+  for (QWidget* widget : QApplication::topLevelWidgets()) {
+    auto* other = qobject_cast<MainWindow*>(widget);
+    if (other != nullptr && other != &window) {
+      detached.append(other);
+    }
+  }
+  QCOMPARE(detached.size(), 1);
+  qDeleteAll(detached);
+}
 
 void WindowActionsTest::controlsTabBarVisibility() {
   GhosttyApp ghostty;
