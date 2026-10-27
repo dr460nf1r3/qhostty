@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.25)
-project(qhostty VERSION 0.1.0 LANGUAGES CXX)
+project(qhostty VERSION 0.1.0 LANGUAGES C CXX)
 
 set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTOUIC ON)
@@ -7,13 +7,42 @@ set(CMAKE_AUTORCC ON)
 
 find_package(Qt6 6.5 REQUIRED COMPONENTS Core DBus Gui Network Widgets OpenGL OpenGLWidgets)
 find_package(OpenGL REQUIRED COMPONENTS EGL)
+if(NOT TARGET Qt6::GuiPrivate)
+  find_package(Qt6 REQUIRED COMPONENTS GuiPrivate)
+endif()
+find_package(PkgConfig REQUIRED)
+pkg_check_modules(WaylandClient REQUIRED IMPORTED_TARGET wayland-client)
+pkg_check_modules(Xcb REQUIRED IMPORTED_TARGET xcb)
+pkg_get_variable(WAYLAND_SCANNER_PATH wayland-scanner wayland_scanner)
+find_program(WAYLAND_SCANNER NAMES wayland-scanner
+  HINTS "${WAYLAND_SCANNER_PATH}" REQUIRED)
 find_package(LayerShellQt QUIET)
 find_package(KF6WindowSystem QUIET)
 find_package(KF6GlobalAccel QUIET)
 
 include(cmake/Ghostty.cmake)
 
+set(QHOSTTY_PROTOCOL_DIR "${CMAKE_CURRENT_BINARY_DIR}/protocols")
+set(QHOSTTY_BLUR_PROTOCOL
+  "${CMAKE_CURRENT_SOURCE_DIR}/protocols/ext-background-effect-v1.xml")
+file(MAKE_DIRECTORY "${QHOSTTY_PROTOCOL_DIR}")
+add_custom_command(
+  OUTPUT
+    "${QHOSTTY_PROTOCOL_DIR}/ext-background-effect-v1-client-protocol.h"
+    "${QHOSTTY_PROTOCOL_DIR}/ext-background-effect-v1-protocol.c"
+  COMMAND "${WAYLAND_SCANNER}" client-header "${QHOSTTY_BLUR_PROTOCOL}"
+    "${QHOSTTY_PROTOCOL_DIR}/ext-background-effect-v1-client-protocol.h"
+  COMMAND "${WAYLAND_SCANNER}" private-code "${QHOSTTY_BLUR_PROTOCOL}"
+    "${QHOSTTY_PROTOCOL_DIR}/ext-background-effect-v1-protocol.c"
+  DEPENDS "${QHOSTTY_BLUR_PROTOCOL}"
+  VERBATIM
+)
+
 qt_add_library(qhostty_frontend STATIC
+  src/BackgroundBlur.cpp
+  src/BackgroundBlur.h
+  "${QHOSTTY_PROTOCOL_DIR}/ext-background-effect-v1-client-protocol.h"
+  "${QHOSTTY_PROTOCOL_DIR}/ext-background-effect-v1-protocol.c"
   src/CommandPalette.cpp
   src/CommandPalette.h
   src/DropText.cpp
@@ -45,6 +74,7 @@ qt_add_library(qhostty_frontend STATIC
 )
 add_dependencies(qhostty_frontend qhostty_libghostty)
 target_include_directories(qhostty_frontend PUBLIC src)
+target_include_directories(qhostty_frontend PRIVATE "${QHOSTTY_PROTOCOL_DIR}")
 target_compile_features(qhostty_frontend PUBLIC cxx_std_20)
 target_compile_options(qhostty_frontend PRIVATE -Wall -Wextra -Wpedantic)
 target_link_libraries(qhostty_frontend PUBLIC
@@ -57,6 +87,11 @@ target_link_libraries(qhostty_frontend PUBLIC
   Qt6::OpenGL
   Qt6::OpenGLWidgets
   OpenGL::EGL
+)
+target_link_libraries(qhostty_frontend PRIVATE
+  Qt6::GuiPrivate
+  PkgConfig::WaylandClient
+  PkgConfig::Xcb
 )
 if(TARGET LayerShellQt::Interface)
   target_link_libraries(qhostty_frontend PRIVATE LayerShellQt::Interface)

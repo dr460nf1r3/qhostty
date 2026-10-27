@@ -19,6 +19,9 @@
   simdutf,
   spirv-cross,
   zlib,
+  libxcb,
+  wayland,
+  wayland-scanner,
   kdePackages,
   ghostty,
   optimize ? "fast",
@@ -61,6 +64,7 @@ in
       ninja
       pkg-config
       zig_0_17
+      wayland-scanner
       kdePackages.wrapQtAppsHook
     ];
 
@@ -79,6 +83,8 @@ in
       simdutf
       spirv-cross
       zlib
+      libxcb
+      wayland
       kdePackages.qtbase
       kdePackages.layer-shell-qt
       kdePackages.kwindowsystem

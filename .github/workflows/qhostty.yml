@@ -40,7 +40,8 @@ jobs:
           sudo apt-get update
           sudo apt-get install --yes --no-install-recommends \
             appstream cmake desktop-file-utils libfontconfig-dev libfreetype-dev \
-            libegl-dev libgl-dev libharfbuzz-dev libxkbcommon-dev ninja-build
+            libegl-dev libgl-dev libharfbuzz-dev libwayland-dev libxcb1-dev \
+            libxkbcommon-dev ninja-build
 
       - name: Configure
         run: cmake -S qt -B build/qt -G Ninja -DCMAKE_BUILD_TYPE=Debug -DBUILD_TESTING=ON
