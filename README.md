@@ -111,7 +111,7 @@ A Plasma Wayland smoke test must cover shell rendering, keyboard shortcuts, IME 
 - Exact Wayland quick-terminal placement and layering require LayerShellQt. Without it, Qhostty uses a normal frameless tool window because Wayland clients cannot choose their own global position.
 - Global shortcuts require KF6GlobalAccel and Plasma approval. Other desktops need their own shortcut integration.
 - Single-instance forwarding supports working directory, title, font size, command, initial input, wait behavior, and `-e` command arguments. Arbitrary per-window Ghostty CLI configuration is not replayed in the running process.
-- Secure keyboard entry has no reliable Linux equivalent. Structural undo/redo, background-only opacity toggling, and built-in update checks are reported as unsupported and omitted from the command palette.
+- Secure keyboard entry has no reliable Linux equivalent. Structural undo/redo and built-in update checks are reported as unsupported and omitted from the command palette.
 - Floating and activation requests remain subject to the Wayland compositor's focus and stacking policy.
 - The package temporarily reuses Ghostty's icon and depends on Ghostty terminfo and shell-integration packages.
 - NVIDIA, ibus, fcitx, CJK input, and 200% scaling still need broader manual hardware coverage.
