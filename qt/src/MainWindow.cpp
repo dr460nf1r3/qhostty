@@ -270,9 +270,6 @@ std::optional<bool> MainWindow::handleAction(TerminalWidget* source,
       }
       return true;
     }
-    case GHOSTTY_ACTION_TOGGLE_BACKGROUND_OPACITY:
-      qWarning() << "Background-only opacity toggling is unsupported";
-      return false;
     case GHOSTTY_ACTION_TOGGLE_TAB_OVERVIEW: {
       QMenu menu(this);
       for (int index = 0; index < m_tabBar->count(); ++index) {

@@ -1023,7 +1023,9 @@ void TerminalWidget::createSurface() {
   m_surface = ghostty_surface_new(m_app->handle(), &m_config);
   if (m_surface == nullptr) {
     qCritical("Failed to create Ghostty surface");
+    return;
   }
+  m_app->applyBackgroundOpacity(this);
 }
 
 void TerminalWidget::destroySurface() {
