@@ -16,6 +16,8 @@ include(cmake/Ghostty.cmake)
 qt_add_library(qhostty_frontend STATIC
   src/CommandPalette.cpp
   src/CommandPalette.h
+  src/DropText.cpp
+  src/DropText.h
   src/FramePresenter.cpp
   src/FramePresenter.h
   src/GhosttyApp.cpp

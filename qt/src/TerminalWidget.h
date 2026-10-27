@@ -13,6 +13,9 @@
 #include "FramePresenter.h"
 
 class QAction;
+class QDragEnterEvent;
+class QDragMoveEvent;
+class QDropEvent;
 class QEvent;
 class QFocusEvent;
 class QFrame;
@@ -93,6 +96,9 @@ class TerminalWidget final : public QOpenGLWidget {
   void mousePressEvent(QMouseEvent* event) override;
   void mouseReleaseEvent(QMouseEvent* event) override;
   void wheelEvent(QWheelEvent* event) override;
+  void dragEnterEvent(QDragEnterEvent* event) override;
+  void dragMoveEvent(QDragMoveEvent* event) override;
+  void dropEvent(QDropEvent* event) override;
   void leaveEvent(QEvent* event) override;
   void focusInEvent(QFocusEvent* event) override;
   void focusOutEvent(QFocusEvent* event) override;
