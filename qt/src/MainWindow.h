@@ -11,6 +11,7 @@ class CommandPalette;
 class GhosttyApp;
 class QCloseEvent;
 class QEvent;
+class QShowEvent;
 class QStackedWidget;
 class QTabBar;
 class TerminalTab;
@@ -50,6 +51,7 @@ class MainWindow final : public QMainWindow {
 
  protected:
   void changeEvent(QEvent* event) override;
+  void showEvent(QShowEvent* event) override;
   void closeEvent(QCloseEvent* event) override;
 
  private:
@@ -65,6 +67,7 @@ class MainWindow final : public QMainWindow {
   void connectTab(TerminalTab* tab);
   void updateTabTitle(TerminalTab* tab, const QString& title);
   void updateWindowTitle();
+  void applyBackgroundBlur();
   bool resizeTerminal(TerminalTab* tab,
                       TerminalWidget* terminal,
                       const ghostty_action_resize_window_s& size);
@@ -80,4 +83,5 @@ class MainWindow final : public QMainWindow {
   QPointer<CommandPalette> m_commandPalette;
   bool m_quickTerminalAutohide = false;
   QString m_titleOverride;
+  bool m_backgroundBlur = false;
 };
