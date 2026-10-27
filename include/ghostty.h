@@ -70,6 +70,7 @@ typedef enum {
   GHOSTTY_PLATFORM_INVALID,
   GHOSTTY_PLATFORM_MACOS,
   GHOSTTY_PLATFORM_IOS,
+  GHOSTTY_PLATFORM_EGL,
 } ghostty_platform_e;
 
 typedef enum {
@@ -494,9 +495,17 @@ typedef struct {
   void* uiview;
 } ghostty_platform_ios_s;
 
+// Linux hosts that present the frames of the OpenGL renderer.
+typedef struct {
+  // The EGL display of the host, or NULL for a surfaceless display.
+  // Only the first surface of an app sets the display.
+  void* display;
+} ghostty_platform_egl_s;
+
 typedef union {
   ghostty_platform_macos_s macos;
   ghostty_platform_ios_s ios;
+  ghostty_platform_egl_s egl;
 } ghostty_platform_u;
 
 typedef enum {
@@ -1067,6 +1076,36 @@ typedef struct {
   ghostty_action_u action;
 } ghostty_action_s;
 
+// apprt.embedded.CAPI.OpenGL.FrameType
+typedef enum {
+  GHOSTTY_FRAME_DMABUF,
+  GHOSTTY_FRAME_MEMORY,
+} ghostty_frame_e;
+
+// apprt.embedded.CAPI.OpenGL.Frame
+//
+// A frame of the OpenGL renderer. Rows start at the bottom of the image.
+// Pixels are RGBA8 with premultiplied alpha.
+typedef struct {
+  ghostty_frame_e type;
+  uint32_t width;
+  uint32_t height;
+
+  // GHOSTTY_FRAME_DMABUF
+  uint32_t fourcc;
+  uint64_t modifier;
+  uint32_t plane_count;
+  int fds[4];
+  int offsets[4];
+  int strides[4];
+
+  // GHOSTTY_FRAME_MEMORY: tightly packed rows of width * 4 bytes.
+  const uint8_t* pixels;
+  size_t pixels_len;
+
+  void* handle;
+} ghostty_frame_s;
+
 typedef void (*ghostty_runtime_wakeup_cb)(void*);
 typedef ghostty_clipboard_read_result_e (*ghostty_runtime_read_clipboard_cb)(
     void*,
@@ -1186,6 +1225,15 @@ GHOSTTY_API bool ghostty_surface_needs_confirm_quit(ghostty_surface_t);
 GHOSTTY_API bool ghostty_surface_process_exited(ghostty_surface_t);
 GHOSTTY_API void ghostty_surface_refresh(ghostty_surface_t);
 GHOSTTY_API void ghostty_surface_draw(ghostty_surface_t);
+
+#ifdef __linux__
+GHOSTTY_API bool ghostty_surface_take_frame(ghostty_surface_t,
+                                           ghostty_frame_s*);
+GHOSTTY_API void ghostty_frame_free(ghostty_frame_s*);
+GHOSTTY_API void ghostty_surface_report_presentation_health(
+    ghostty_surface_t,
+    ghostty_action_renderer_health_e);
+#endif
 GHOSTTY_API void ghostty_surface_set_content_scale(ghostty_surface_t, double, double);
 GHOSTTY_API void ghostty_surface_set_focus(ghostty_surface_t, bool);
 GHOSTTY_API void ghostty_surface_set_occlusion(ghostty_surface_t, bool);

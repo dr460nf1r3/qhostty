@@ -6,6 +6,7 @@
 
 const std = @import("std");
 const builtin = @import("builtin");
+const build_config = @import("../build_config.zig");
 const assert = @import("../quirks.zig").inlineAssert;
 const Allocator = std.mem.Allocator;
 const objc = @import("objc");
@@ -382,6 +383,7 @@ pub const App = struct {
 pub const Platform = union(PlatformTag) {
     macos: MacOS,
     ios: IOS,
+    egl: EGL,
 
     // If our build target for libghostty is not darwin then we do
     // not include macos support at all.
@@ -395,6 +397,12 @@ pub const Platform = union(PlatformTag) {
         uiview: objc.Object,
     } else void;
 
+    pub const EGL = if (builtin.target.os.tag == .linux) struct {
+        /// The EGL display of the host. If null, the renderer uses a
+        /// surfaceless display.
+        display: ?*anyopaque,
+    } else void;
+
     // The C ABI compatible version of this union. The tag is expected
     // to be stored elsewhere.
     pub const C = extern union {
@@ -404,6 +412,10 @@ pub const Platform = union(PlatformTag) {
 
         ios: extern struct {
             uiview: ?*anyopaque,
+        },
+
+        egl: extern struct {
+            display: ?*anyopaque,
         },
     };
 
@@ -424,6 +436,10 @@ pub const Platform = union(PlatformTag) {
                     break :ios error.UIViewMustBeSet);
                 break :ios .{ .ios = .{ .uiview = uiview } };
             } else error.UnsupportedPlatform,
+
+            .egl => if (EGL != void) .{ .egl = .{
+                .display = c_platform.egl.display,
+            } } else error.UnsupportedPlatform,
         };
     }
 };
@@ -434,6 +450,7 @@ pub const PlatformTag = enum(c_int) {
 
     macos = 1,
     ios = 2,
+    egl = 3,
 };
 
 pub const EnvVar = extern struct {
@@ -1251,9 +1268,14 @@ pub const Surface = struct {
     }
 
     pub fn renderDeviceOptions(self: *const Surface) !renderer.Device.Options {
-        // The Metal renderer currently does not have any options
-        _ = self;
-        return .{};
+        return switch (build_config.renderer) {
+            // The Metal renderer currently does not have any options
+            .metal => .{},
+            .opengl => switch (self.platform) {
+                .egl => |egl| .{ .display = @ptrCast(egl.display) },
+                else => error.UnsupportedPlatform,
+            },
+        };
     }
 };
 
@@ -1697,6 +1719,9 @@ pub const CAPI = struct {
     comptime {
         if (builtin.target.os.tag.isDarwin()) {
             _ = Darwin;
+        }
+        if (build_config.renderer == .opengl) {
+            _ = OpenGL;
         }
     }
 
@@ -2457,6 +2482,102 @@ pub const CAPI = struct {
     extern "c" fn CGSDefaultConnectionForThread() *anyopaque;
 
     // Darwin-only C APIs.
+    /// Frame export for hosts that present the frames of the OpenGL
+    /// renderer themselves.
+    const OpenGL = struct {
+        const ExportedFrame = renderer.Renderer.ExportedFrame;
+
+        const FrameType = enum(c_int) {
+            dmabuf,
+            memory,
+        };
+
+        /// ghostty_frame_s
+        const Frame = extern struct {
+            type: FrameType,
+            width: u32,
+            height: u32,
+            fourcc: u32,
+            modifier: u64,
+            plane_count: u32,
+            fds: [4]c_int,
+            offsets: [4]c_int,
+            strides: [4]c_int,
+            pixels: ?[*]const u8,
+            pixels_len: usize,
+            handle: ?*ExportedFrame,
+        };
+
+        /// Take the latest frame of the renderer. Returns false if there
+        /// is no new frame. The caller must free the frame with
+        /// ghostty_frame_free.
+        export fn ghostty_surface_take_frame(
+            surface: *Surface,
+            result: *Frame,
+        ) bool {
+            const frame = surface.core_surface.renderer.takeFrame() orelse
+                return false;
+            const handle = global.alloc().create(ExportedFrame) catch {
+                frame.deinit();
+                return false;
+            };
+            handle.* = frame;
+
+            result.* = .{
+                .type = .memory,
+                .width = 0,
+                .height = 0,
+                .fourcc = 0,
+                .modifier = 0,
+                .plane_count = 0,
+                .fds = @splat(-1),
+                .offsets = @splat(0),
+                .strides = @splat(0),
+                .pixels = null,
+                .pixels_len = 0,
+                .handle = handle,
+            };
+            switch (frame) {
+                .dmabuf => |v| {
+                    result.type = .dmabuf;
+                    result.width = v.width;
+                    result.height = v.height;
+                    result.fourcc = v.fourcc;
+                    result.modifier = v.modifier;
+                    result.plane_count = v.planes.count;
+                    result.fds = v.planes.fds;
+                    result.offsets = v.planes.offsets;
+                    result.strides = v.planes.strides;
+                },
+                .memory => |v| {
+                    result.width = v.width;
+                    result.height = v.height;
+                    result.pixels = v.pixels.ptr;
+                    result.pixels_len = v.pixels.len;
+                },
+            }
+            return true;
+        }
+
+        /// Free a frame from ghostty_surface_take_frame. This closes the
+        /// DMABUF file descriptors of the frame.
+        export fn ghostty_frame_free(frame: *Frame) void {
+            const handle = frame.handle orelse return;
+            handle.deinit();
+            global.alloc().destroy(handle);
+            frame.handle = null;
+        }
+
+        /// Tell the renderer if the host can present DMABUF frames. If the
+        /// health is unhealthy, the renderer exports frames in CPU memory.
+        export fn ghostty_surface_report_presentation_health(
+            surface: *Surface,
+            health: renderer.Health,
+        ) void {
+            surface.core_surface.reportPresentationHealth(health);
+        }
+    };
+
     const Darwin = struct {
         export fn ghostty_surface_set_display_id(ptr: *Surface, display_id: u32) void {
             const surface = &ptr.core_surface;
