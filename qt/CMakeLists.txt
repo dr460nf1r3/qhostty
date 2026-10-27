@@ -205,6 +205,14 @@ install(FILES "${GHOSTTY_SHARED}"
   DESTINATION "${CMAKE_INSTALL_LIBDIR}/qhostty"
   RENAME "libghostty.so"
 )
+# Shell integration and themes from the Zig build. Ghostty finds them in
+# share/ghostty next to the executable.
+option(QHOSTTY_INSTALL_GHOSTTY_RESOURCES
+  "Install the Ghostty shell integration and themes" ON)
+if(QHOSTTY_INSTALL_GHOSTTY_RESOURCES)
+  install(DIRECTORY "${GHOSTTY_PREFIX}/share/ghostty"
+    DESTINATION "${CMAKE_INSTALL_DATADIR}")
+endif()
 install(FILES resources/linux/${QHOSTTY_APP_ID}.desktop
   DESTINATION "${CMAKE_INSTALL_DATADIR}/applications")
 install(FILES resources/linux/${QHOSTTY_APP_ID}.metainfo.xml
