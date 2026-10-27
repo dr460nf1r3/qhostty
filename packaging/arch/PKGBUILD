@@ -3,13 +3,13 @@ pkgver=0.1.0.r0.g000000000
 pkgrel=1
 pkgdesc='Native Qt 6 frontend for the Ghostty terminal core'
 arch=(x86_64 aarch64)
-url='https://github.com/angristan/qhostty'
+url='https://github.com/dr460nf1r3/qhostty'
 license=(MIT)
-depends=(fontconfig gcc-libs glibc ghostty-shell-integration ghostty-terminfo kglobalaccel layer-shell-qt libglvnd qt6-base kwindowsystem)
-makedepends=(cmake git ninja zig)
+depends=(fontconfig gcc-libs glibc ghostty-shell-integration ghostty-terminfo kglobalaccel layer-shell-qt libglvnd opengl-driver qt6-base kwindowsystem)
+makedepends=(cmake git ninja 'zig>=0.17')
 provides=(qhostty)
 conflicts=(qhostty)
-source=('qhostty::git+https://github.com/angristan/qhostty.git')
+source=('qhostty::git+https://github.com/dr460nf1r3/qhostty.git')
 sha256sums=('SKIP')
 
 pkgver() {

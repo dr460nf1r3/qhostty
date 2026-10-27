@@ -73,6 +73,26 @@ DESTDIR="$PWD/pkgroot" cmake --install build/qt-release --prefix /usr
 
 The installed executable uses a private `libghostty.so` under `lib/qhostty`.
 
+## Packages
+
+Arch Linux:
+
+```sh
+cd packaging/arch
+makepkg -si
+```
+
+The package needs `zig` 0.17 or newer. It uses the shell integration and terminfo from `ghostty-shell-integration` and `ghostty-terminfo`.
+
+NixOS:
+
+```sh
+nix build .#qhostty
+nix run .#qhostty
+```
+
+The flake also has an overlay, `overlays.qhostty`, and `nix develop` gives the Qt build dependencies. The package uses the terminfo and shell integration of the `ghostty` package from nixpkgs.
+
 ## Validation
 
 ```sh
