@@ -1,5 +1,6 @@
 #include "MainWindow.h"
 
+#include "BackgroundBlur.h"
 #include "CommandPalette.h"
 #include "GhosttyApp.h"
 #include "TerminalTab.h"
@@ -10,6 +11,7 @@
 #include <QEvent>
 #include <QInputDialog>
 #include <QMenu>
+#include <QShowEvent>
 #include <QStackedWidget>
 #include <QTabBar>
 #include <QTimer>
@@ -29,6 +31,8 @@ MainWindow::MainWindow(GhosttyApp* app,
       m_stack(new QStackedWidget(this)),
       m_role(role) {
   setAttribute(Qt::WA_DeleteOnClose, true);
+  // Terminals draw their own background, which can be translucent.
+  setAttribute(Qt::WA_TranslucentBackground, true);
   setObjectName(QStringLiteral("qhostty-window"));
   setWindowTitle(QStringLiteral("Qhostty"));
 
@@ -39,6 +43,7 @@ MainWindow::MainWindow(GhosttyApp* app,
   m_tabBar->setExpanding(false);
   m_tabBar->setElideMode(Qt::ElideRight);
   m_tabBar->setContextMenuPolicy(Qt::CustomContextMenu);
+  m_tabBar->setAutoFillBackground(true);
   applyConfig(m_app->config());
 
   auto* central = new QWidget(this);
@@ -90,6 +95,7 @@ MainWindow::MainWindow(GhosttyApp* app,
 }
 
 MainWindow::~MainWindow() {
+  qhostty::forgetBackgroundBlur(windowHandle());
   m_app->unregisterWindow(this);
 }
 
@@ -111,6 +117,23 @@ void MainWindow::applyConfig(ghostty_config_t config) {
     m_tabBarVisibility = TabBarVisibility::Auto;
   }
   updateTabBarVisibility();
+
+  int16_t blur = 0;
+  m_backgroundBlur = config != nullptr &&
+                     ghostty_config_get(config, &blur, "background-blur",
+                                        std::strlen("background-blur")) &&
+                     blur != 0;
+  applyBackgroundBlur();
+}
+
+void MainWindow::applyBackgroundBlur() {
+  qhostty::setBackgroundBlur(windowHandle(), m_backgroundBlur);
+}
+
+void MainWindow::showEvent(QShowEvent* event) {
+  QMainWindow::showEvent(event);
+  // Qt can make a new native surface each time the window is shown.
+  applyBackgroundBlur();
 }
 
 int MainWindow::addTab(const ghostty_surface_config_s* baseConfig) {
