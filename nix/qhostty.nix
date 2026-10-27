@@ -108,8 +108,7 @@ in
     postInstall = ''
       mkdir -p "$out/share/ghostty"
       ln -s "${ghostty.terminfo}/share/terminfo" "$out/share/terminfo"
-      ln -s "${ghostty.shell_integration}/shell-integration" \
-        "$out/share/ghostty/shell-integration"
+      ln -s "${ghostty.shell_integration}" "$out/share/ghostty/shell-integration"
     '';
 
     meta = {
