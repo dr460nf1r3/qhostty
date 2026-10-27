@@ -71,13 +71,19 @@ TerminalWidget* TerminalTab::newSplit(
                       direction == GHOSTTY_SPLIT_DIRECTION_UP;
   const Qt::Orientation orientation =
       horizontal ? Qt::Horizontal : Qt::Vertical;
+  // The new terminal gets half of the space of the source terminal.
+  const int available = horizontal ? source->width() : source->height();
 
   if (auto* parentSplitter = qobject_cast<QSplitter*>(source->parentWidget());
       parentSplitter != nullptr &&
       parentSplitter->orientation() == orientation) {
     const int sourceIndex = parentSplitter->indexOf(source);
-    parentSplitter->insertWidget(before ? sourceIndex : sourceIndex + 1,
-                                 terminal);
+    const int terminalIndex = before ? sourceIndex : sourceIndex + 1;
+    QList<int> sizes = parentSplitter->sizes();
+    parentSplitter->insertWidget(terminalIndex, terminal);
+    sizes.insert(terminalIndex, available / 2);
+    sizes[before ? sourceIndex + 1 : sourceIndex] = available - available / 2;
+    parentSplitter->setSizes(sizes);
   } else {
     auto* splitter = new QSplitter(orientation);
     splitter->setChildrenCollapsible(false);
@@ -98,7 +104,7 @@ TerminalWidget* TerminalTab::newSplit(
       splitter->addWidget(source);
       splitter->addWidget(terminal);
     }
-    splitter->setSizes({1, 1});
+    splitter->setSizes({available / 2, available - available / 2});
   }
 
   setActive(terminal);
