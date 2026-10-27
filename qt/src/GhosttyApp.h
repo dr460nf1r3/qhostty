@@ -29,6 +29,7 @@ class GhosttyApp final : public QObject {
   [[nodiscard]] ghostty_app_t handle() const { return m_app; }
   [[nodiscard]] ghostty_config_t config() const { return m_config; }
 
+  void openConfigInWindow(const QString& path);
   MainWindow* createWindow(
       const ghostty_surface_config_s* baseConfig = nullptr);
   MainWindow* activate(const QStringList& arguments,
