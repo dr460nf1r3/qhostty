@@ -226,6 +226,8 @@ pub fn build(b: *std.Build) !void {
         // We shouldn't have this guard but we don't currently
         // build on macOS this way ironically so we need to fix that.
         if (!config.target.result.os.tag.isDarwin()) {
+            // Embedders such as Qhostty ship the runtime resources.
+            resources.installRuntime();
             lib_shared.installHeader(); // Only need one header
             if (config.target.result.os.tag == .windows) {
                 lib_shared.install("ghostty-internal.dll");

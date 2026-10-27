@@ -110,24 +110,10 @@ in
       export ZIG_GLOBAL_CACHE_DIR="$TMPDIR/zig-cache"
     '';
 
-    # Ghostty finds its resources next to the executable.
+    # CMake installs the shell integration and themes. Ghostty finds them
+    # through the terminfo directory next to the executable.
     postInstall = ''
-      mkdir -p "$out/share/ghostty"
       ln -s "${ghostty.terminfo}/share/terminfo" "$out/share/terminfo"
-      ln -s "${ghostty.shell_integration}" "$out/share/ghostty/shell-integration"
-
-      # Themes come from the iterm2_themes Zig dependency, as in Ghostty.
-      for dep in "${finalAttrs.deps}"/*; do
-        if [[ "$(readlink -f "$dep")" == *-iterm2_themes ]]; then
-          mkdir -p "$out/share/ghostty/themes"
-          find "$dep"/ -maxdepth 1 -type f ! -name '*.md' \
-            -exec cp -t "$out/share/ghostty/themes" {} +
-        fi
-      done
-      if [[ ! -d "$out/share/ghostty/themes" ]]; then
-        echo "iterm2_themes dependency not found" >&2
-        exit 1
-      fi
     '';
 
     meta = {

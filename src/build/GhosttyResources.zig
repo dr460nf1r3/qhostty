@@ -8,9 +8,15 @@ const SharedDeps = @import("SharedDeps.zig");
 
 steps: []*std.Build.Step,
 
+/// The resources that libghostty needs at runtime: shell integration and
+/// themes. Embedders install these next to their own executable.
+runtime_steps: []*std.Build.Step,
+
 pub fn init(b: *std.Build, cfg: *const Config, deps: *const SharedDeps) !GhosttyResources {
     var steps: std.ArrayList(*std.Build.Step) = .empty;
     errdefer steps.deinit(b.allocator);
+    var runtime_steps: std.ArrayList(*std.Build.Step) = .empty;
+    errdefer runtime_steps.deinit(b.allocator);
 
     // This is the exe used to generate some build data.
     const build_data_exe = b.addExecutable(.{
@@ -104,6 +110,7 @@ pub fn init(b: *std.Build, cfg: *const Config, deps: *const SharedDeps) !Ghostty
             .exclude_extensions = &.{".md"},
         });
         try steps.append(b.allocator, &install_step.step);
+        try runtime_steps.append(b.allocator, &install_step.step);
     }
 
     // Themes
@@ -116,6 +123,7 @@ pub fn init(b: *std.Build, cfg: *const Config, deps: *const SharedDeps) !Ghostty
                 .exclude_extensions = &.{".md"},
             });
             try steps.append(b.allocator, &install_step.step);
+            try runtime_steps.append(b.allocator, &install_step.step);
         }
     }
 
@@ -231,7 +239,7 @@ pub fn init(b: *std.Build, cfg: *const Config, deps: *const SharedDeps) !Ghostty
         &steps,
     );
 
-    return .{ .steps = steps.items };
+    return .{ .steps = steps.items, .runtime_steps = runtime_steps.items };
 }
 
 /// Add the resource files needed to make Ghostty a proper
@@ -425,6 +433,12 @@ fn addLinuxAppResources(
 pub fn install(self: *const GhosttyResources) void {
     const b = self.steps[0].owner;
     self.addStepDependencies(b.getInstallStep());
+}
+
+/// Install only the runtime resources. See `runtime_steps`.
+pub fn installRuntime(self: *const GhosttyResources) void {
+    const b = self.steps[0].owner;
+    for (self.runtime_steps) |step| b.getInstallStep().dependOn(step);
 }
 
 pub fn addStepDependencies(

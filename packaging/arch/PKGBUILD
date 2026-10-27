@@ -30,7 +30,8 @@ build() {
     -DCMAKE_INSTALL_PREFIX=/usr \
     -DCMAKE_INSTALL_LIBDIR=lib \
     -DQHOSTTY_GHOSTTY_OPTIMIZE=ReleaseFast \
-    -DQHOSTTY_GHOSTTY_CPU=baseline
+    -DQHOSTTY_GHOSTTY_CPU=baseline \
+    -DQHOSTTY_INSTALL_GHOSTTY_RESOURCES=OFF
   cmake --build build
 }
 
