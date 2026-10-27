@@ -2,9 +2,10 @@
 
 #include <QGuiApplication>
 #include <QHash>
+#include <QPlatformSurfaceEvent>
 #include <QWindow>
 
-#include <qpa/qplatformnativeinterface.h>
+#include <qpa/qplatformwindow_p.h>
 #include <wayland-client.h>
 #include <xcb/xcb.h>
 
@@ -17,17 +18,139 @@
 namespace qhostty {
 namespace {
 
-struct WaylandBlur {
+// Tracks the blur state of each window. Qt can destroy and create the
+// wl_surface of a window at any time, so the effect object follows the
+// surface signals of Qt, as in KWindowSystem.
+class WaylandBlur final : public QObject {
+ public:
   wl_display* display = nullptr;
   wl_event_queue* queue = nullptr;
   ext_background_effect_manager_v1* manager = nullptr;
   uint32_t capabilities = 0;
 
-  struct Surface {
-    wl_surface* surface = nullptr;
+  bool set(QWindow* window, bool enabled) {
+    State& state = m_windows[window];
+    state.enabled = enabled;
+    track(window, state);
+    install(window);
+    return true;
+  }
+
+  void forget(QWindow* window) {
+    auto it = m_windows.find(window);
+    if (it == m_windows.end()) {
+      return;
+    }
+    resetEffect(*it);
+    disconnect(it->windowDestroyed);
+    disconnect(it->surfaceDestroyed);
+    window->removeEventFilter(this);
+    m_windows.erase(it);
+  }
+
+ protected:
+  bool eventFilter(QObject* watched, QEvent* event) override {
+    auto* window = qobject_cast<QWindow*>(watched);
+    if (window == nullptr) {
+      return false;
+    }
+    if (event->type() == QEvent::Expose && window->isExposed()) {
+      install(window);
+    } else if (event->type() == QEvent::PlatformSurface) {
+      auto it = m_windows.find(window);
+      if (it == m_windows.end()) {
+        return false;
+      }
+      if (static_cast<QPlatformSurfaceEvent*>(event)->surfaceEventType() ==
+          QPlatformSurfaceEvent::SurfaceAboutToBeDestroyed) {
+        resetEffect(*it);
+      } else {
+        // Qt made a new platform window, which has its own signals.
+        disconnect(it->surfaceDestroyed);
+        it->surfaceDestroyed = {};
+        track(window, *it);
+      }
+    }
+    return false;
+  }
+
+ private:
+  struct State {
+    bool enabled = false;
     ext_background_effect_surface_v1* effect = nullptr;
+    QMetaObject::Connection windowDestroyed;
+    QMetaObject::Connection surfaceDestroyed;
   };
-  QHash<QWindow*, Surface> surfaces;
+
+  void track(QWindow* window, State& state) {
+    if (!state.windowDestroyed) {
+      window->installEventFilter(this);
+      state.windowDestroyed = connect(window, &QObject::destroyed, this,
+                                      [this, window]() { forget(window); });
+    }
+    if (!state.surfaceDestroyed) {
+      auto* native =
+          window->nativeInterface<QNativeInterface::Private::QWaylandWindow>();
+      if (native != nullptr) {
+        state.surfaceDestroyed = connect(
+            native, &QNativeInterface::Private::QWaylandWindow::surfaceDestroyed,
+            this, [this, window]() {
+              auto it = m_windows.find(window);
+              if (it != m_windows.end()) {
+                resetEffect(*it);
+              }
+            });
+      }
+    }
+  }
+
+  void resetEffect(State& state) {
+    if (state.effect != nullptr) {
+      ext_background_effect_surface_v1_destroy(state.effect);
+      state.effect = nullptr;
+      wl_display_flush(display);
+    }
+  }
+
+  void install(QWindow* window) {
+    auto it = m_windows.find(window);
+    if (it == m_windows.end()) {
+      return;
+    }
+    wl_display_dispatch_queue_pending(display, queue);
+
+    auto* native =
+        window->nativeInterface<QNativeInterface::Private::QWaylandWindow>();
+    wl_surface* surface = native == nullptr ? nullptr : native->surface();
+    const bool supported =
+        manager != nullptr &&
+        (capabilities & EXT_BACKGROUND_EFFECT_MANAGER_V1_CAPABILITY_BLUR);
+    if (surface == nullptr || !supported) {
+      return;
+    }
+
+    if (!it->enabled) {
+      resetEffect(*it);
+      return;
+    }
+
+    if (it->effect == nullptr) {
+      it->effect =
+          ext_background_effect_manager_v1_get_background_effect(manager,
+                                                                 surface);
+    }
+    auto* wayland =
+        qGuiApp->nativeInterface<QNativeInterface::QWaylandApplication>();
+    wl_region* region = wl_compositor_create_region(wayland->compositor());
+    // The compositor clips the region to the surface size.
+    wl_region_add(region, 0, 0, std::numeric_limits<int32_t>::max(),
+                  std::numeric_limits<int32_t>::max());
+    ext_background_effect_surface_v1_set_blur_region(it->effect, region);
+    wl_region_destroy(region);
+    wl_display_flush(display);
+  }
+
+  QHash<QWindow*, State> m_windows;
 };
 
 void onCapabilities(void* data,
@@ -74,6 +197,7 @@ WaylandBlur* waylandBlur() {
     }
 
     auto* result = new WaylandBlur;
+    result->setParent(qGuiApp);
     result->display = wayland->display();
     result->queue = wl_display_create_queue(result->display);
     auto* wrapper = static_cast<wl_display*>(
@@ -91,60 +215,11 @@ WaylandBlur* waylandBlur() {
   return blur;
 }
 
-wl_surface* waylandSurface(QWindow* window) {
-  QPlatformNativeInterface* native = QGuiApplication::platformNativeInterface();
-  return native == nullptr ? nullptr
-                           : static_cast<wl_surface*>(
-                                 native->nativeResourceForWindow(
-                                     QByteArrayLiteral("surface"), window));
-}
-
 bool setWaylandBlur(QWindow* window, bool enabled) {
   WaylandBlur* blur = waylandBlur();
-  if (blur == nullptr) {
-    return false;
-  }
-  wl_display_dispatch_queue_pending(blur->display, blur->queue);
-
-  WaylandBlur::Surface& state = blur->surfaces[window];
-  wl_surface* surface = waylandSurface(window);
-  if (state.surface != surface && state.effect != nullptr) {
-    // Qt made a new wl_surface. The old effect object is inert.
-    ext_background_effect_surface_v1_destroy(state.effect);
-    state.effect = nullptr;
-  }
-  state.surface = surface;
-
-  const bool supported =
-      blur->manager != nullptr &&
-      (blur->capabilities & EXT_BACKGROUND_EFFECT_MANAGER_V1_CAPABILITY_BLUR);
-  if (surface == nullptr || !supported) {
-    return true;
-  }
-
-  if (state.effect == nullptr) {
-    if (!enabled) {
-      return true;
-    }
-    state.effect = ext_background_effect_manager_v1_get_background_effect(
-        blur->manager, surface);
-  }
-
-  if (!enabled) {
-    ext_background_effect_surface_v1_set_blur_region(state.effect, nullptr);
-  } else {
-    auto* wayland =
-        qGuiApp->nativeInterface<QNativeInterface::QWaylandApplication>();
-    wl_region* region = wl_compositor_create_region(wayland->compositor());
-    // The compositor clips the region to the surface size.
-    wl_region_add(region, 0, 0, std::numeric_limits<int32_t>::max(),
-                  std::numeric_limits<int32_t>::max());
-    ext_background_effect_surface_v1_set_blur_region(state.effect, region);
-    wl_region_destroy(region);
-  }
-  wl_display_flush(blur->display);
-  return true;
+  return blur != nullptr && blur->set(window, enabled);
 }
+
 bool setX11Blur(QWindow* window, bool enabled) {
   auto* x11 = qGuiApp->nativeInterface<QNativeInterface::QX11Application>();
   if (x11 == nullptr || x11->connection() == nullptr) {
@@ -185,13 +260,8 @@ void setBackgroundBlur(QWindow* window, bool enabled) {
 }
 
 void forgetBackgroundBlur(QWindow* window) {
-  WaylandBlur* blur = waylandBlur();
-  if (blur == nullptr) {
-    return;
-  }
-  const WaylandBlur::Surface state = blur->surfaces.take(window);
-  if (state.effect != nullptr) {
-    ext_background_effect_surface_v1_destroy(state.effect);
+  if (WaylandBlur* blur = waylandBlur(); blur != nullptr && window != nullptr) {
+    blur->forget(window);
   }
 }
 
