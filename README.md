@@ -25,7 +25,7 @@ Qhostty currently provides:
 - Single-instance activation with working-directory and command forwarding
 - `qhostty +new-window` and `qhostty +new-tab` open a window or a tab in the running instance
 - Drag and drop of text and files, with paste protection
-- `background-opacity` and `background-blur`. Blur uses the `ext-background-effect-v1` Wayland protocol, or the KDE blur property on X11
+- `background-opacity`, `background-blur`, and `toggle_background_opacity`. Blur uses the `ext-background-effect-v1` Wayland protocol, or the KDE blur property on X11
 - A persistent quick terminal with Plasma Wayland and X11 integration
 - KDE global shortcuts for Ghostty `global:` bindings when KGlobalAccel is available
 - A searchable command palette and an OpenGL terminal inspector

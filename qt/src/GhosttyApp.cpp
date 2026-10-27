@@ -19,6 +19,7 @@
 #include <QMetaObject>
 #include <QPalette>
 #include <QStyleHints>
+#include <QTemporaryFile>
 #include <QTimer>
 #include <QUrl>
 
@@ -27,7 +28,7 @@
 #include <optional>
 
 namespace {
-ghostty_config_t loadConfig() {
+ghostty_config_t loadConfig(const QByteArray& overridePath = {}) {
   ghostty_config_t config = ghostty_config_new();
   if (config == nullptr) {
     return nullptr;
@@ -36,8 +37,25 @@ ghostty_config_t loadConfig() {
   ghostty_config_load_default_files(config);
   ghostty_config_load_cli_args(config);
   ghostty_config_load_recursive_files(config);
+  if (!overridePath.isEmpty()) {
+    ghostty_config_load_file(config, overridePath.constData());
+  }
   ghostty_config_finalize(config);
   return config;
+}
+
+// The configuration with an opaque background, for toggle_background_opacity.
+ghostty_config_t loadOpaqueConfig() {
+  static QTemporaryFile* file = []() {
+    auto* result = new QTemporaryFile(qApp);
+    if (result->open()) {
+      result->write("background-opacity = 1\n");
+      result->flush();
+    }
+    return result;
+  }();
+  return file->fileName().isEmpty() ? nullptr
+                                    : loadConfig(file->fileName().toUtf8());
 }
 
 void logDiagnostics(ghostty_config_t config) {
@@ -174,6 +192,10 @@ GhosttyApp::~GhosttyApp() {
     ghostty_config_free(m_config);
     m_config = nullptr;
   }
+  if (m_opaqueConfig != nullptr) {
+    ghostty_config_free(m_opaqueConfig);
+    m_opaqueConfig = nullptr;
+  }
 }
 
 bool GhosttyApp::initialize() {
@@ -243,6 +265,9 @@ bool GhosttyApp::reloadConfig(bool soft) {
 
   ghostty_app_update_config(m_app, replacement);
   ghostty_config_free(replacement);
+  if (m_backgroundOpaque) {
+    syncBackgroundOpacity();
+  }
   return true;
 }
 
@@ -264,7 +289,47 @@ bool GhosttyApp::reloadConfig(TerminalWidget* widget, bool soft) {
   logDiagnostics(replacement);
   ghostty_surface_update_config(widget->surface(), replacement);
   ghostty_config_free(replacement);
+  if (m_backgroundOpaque) {
+    syncBackgroundOpacity();
+  }
   return true;
+}
+
+bool GhosttyApp::toggleBackgroundOpacity() {
+  double opacity = 1;
+  ghostty_config_get(m_config, &opacity, "background-opacity",
+                     std::strlen("background-opacity"));
+  if (opacity >= 1 && !m_backgroundOpaque) {
+    return false;
+  }
+
+  m_backgroundOpaque = !m_backgroundOpaque;
+  syncBackgroundOpacity();
+  return true;
+}
+
+void GhosttyApp::syncBackgroundOpacity() {
+  if (m_opaqueConfig != nullptr) {
+    ghostty_config_free(m_opaqueConfig);
+    m_opaqueConfig = nullptr;
+  }
+  if (m_backgroundOpaque) {
+    m_opaqueConfig = loadOpaqueConfig();
+  }
+
+  for (TerminalWidget* widget : m_surfaces) {
+    if (widget != nullptr && widget->surface() != nullptr) {
+      ghostty_surface_update_config(
+          widget->surface(),
+          m_opaqueConfig != nullptr ? m_opaqueConfig : m_config);
+    }
+  }
+}
+
+void GhosttyApp::applyBackgroundOpacity(TerminalWidget* widget) {
+  if (m_opaqueConfig != nullptr && widget->surface() != nullptr) {
+    ghostty_surface_update_config(widget->surface(), m_opaqueConfig);
+  }
 }
 
 void GhosttyApp::openConfigInWindow(const QString& path) {
@@ -555,6 +620,8 @@ bool GhosttyApp::handleAction(ghostty_target_s target,
                        QString::fromUtf8(notification.body));
       return true;
     }
+    case GHOSTTY_ACTION_TOGGLE_BACKGROUND_OPACITY:
+      return toggleBackgroundOpacity();
     case GHOSTTY_ACTION_OPEN_CONFIG: {
       const ghostty_string_s path = ghostty_config_open_path();
       const QString value =
