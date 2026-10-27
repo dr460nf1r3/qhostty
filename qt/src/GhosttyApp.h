@@ -30,6 +30,8 @@ class GhosttyApp final : public QObject {
   [[nodiscard]] ghostty_config_t config() const { return m_config; }
 
   void openConfigInWindow(const QString& path);
+  bool toggleBackgroundOpacity();
+  void applyBackgroundOpacity(TerminalWidget* widget);
   MainWindow* createWindow(
       const ghostty_surface_config_s* baseConfig = nullptr);
   MainWindow* activate(const QStringList& arguments,
@@ -72,6 +74,7 @@ class GhosttyApp final : public QObject {
   void scheduleQuitTimer();
   void tick();
   void syncColorScheme();
+  void syncBackgroundOpacity();
 
   static TerminalWidget* widgetForTarget(ghostty_target_s target);
 
@@ -85,4 +88,6 @@ class GhosttyApp final : public QObject {
   QPointer<MainWindow> m_quickTerminal;
   QSet<TerminalWidget*> m_surfaces;
   std::atomic_bool m_tickQueued = false;
+  bool m_backgroundOpaque = false;
+  ghostty_config_t m_opaqueConfig = nullptr;
 };

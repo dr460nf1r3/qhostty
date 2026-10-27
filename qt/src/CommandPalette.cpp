@@ -19,7 +19,6 @@ QString copied(const char* value) {
 
 bool supportedCommand(const QString& actionKey) {
   return actionKey != QStringLiteral("toggle_secure_input") &&
-         actionKey != QStringLiteral("toggle_background_opacity") &&
          actionKey != QStringLiteral("undo") &&
          actionKey != QStringLiteral("redo") &&
          actionKey != QStringLiteral("check_for_updates") &&
