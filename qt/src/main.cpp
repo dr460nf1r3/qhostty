@@ -2,7 +2,6 @@
 #include "SingleInstance.h"
 
 #include <QApplication>
-#include <QColorSpace>
 #include <QCryptographicHash>
 #include <QDebug>
 #include <QDir>
@@ -45,7 +44,8 @@ int main(int argc, char** argv) {
   format.setVersion(4, 3);
   format.setProfile(QSurfaceFormat::CoreProfile);
   format.setSwapBehavior(QSurfaceFormat::DoubleBuffer);
-  format.setColorSpace(QColorSpace::SRgb);
+  // Windows need an alpha channel for background-opacity.
+  format.setAlphaBufferSize(8);
   QSurfaceFormat::setDefaultFormat(format);
 
   QApplication application(argc, argv);
