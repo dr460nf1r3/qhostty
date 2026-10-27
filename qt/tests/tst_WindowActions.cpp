@@ -1,4 +1,5 @@
 #include "CommandPalette.h"
+#include "DropText.h"
 #include "GhosttyApp.h"
 #include "GlobalShortcuts.h"
 #include "InputCoordinates.h"
@@ -12,6 +13,9 @@
 #include <QApplication>
 #include <QLabel>
 #include <QMenu>
+#include <QMimeData>
+#include <QUrl>
+#include <QDir>
 #include <QPointer>
 #include <QProgressBar>
 #include <QScrollBar>
@@ -89,7 +93,49 @@ class WindowActionsTest final : public QObject {
   void controlsTabBarVisibility();
   void routesWindowActions();
   void splitsSpaceEvenly();
+  void buildsDropText();
+  void opensForwardedTabsAndWindows();
 };
+
+void WindowActionsTest::buildsDropText() {
+  QCOMPARE(ghosttyShellEscape(QStringLiteral("a b'$(c)")),
+           QStringLiteral("a\\ b\\'\\$\\(c\\)"));
+
+  QMimeData files;
+  files.setUrls({QUrl::fromLocalFile(QStringLiteral("/tmp/my file")),
+                 QUrl::fromLocalFile(QStringLiteral("/tmp/b"))});
+  QCOMPARE(ghosttyDropText(files), QStringLiteral("/tmp/my\\ file /tmp/b"));
+
+  QMimeData text;
+  text.setText(QStringLiteral("echo hi"));
+  QCOMPARE(ghosttyDropText(text), QStringLiteral("echo hi"));
+}
+
+void WindowActionsTest::opensForwardedTabsAndWindows() {
+  GhosttyApp ghostty;
+  QVERIFY(ghostty.initialize());
+  const QString directory = QDir::currentPath();
+
+  MainWindow* first = ghostty.activate(
+      {QStringLiteral("qhostty"), QStringLiteral("+new-window")}, directory);
+  QVERIFY(first != nullptr);
+  auto* tabBar = first->findChild<QTabBar*>(QStringLiteral("qhostty-tabs"));
+  QCOMPARE(tabBar->count(), 1);
+
+  MainWindow* tabbed = ghostty.activate(
+      {QStringLiteral("qhostty"), QStringLiteral("+new-tab"),
+       QStringLiteral("--title=Logs")},
+      directory);
+  QCOMPARE(tabbed, first);
+  QCOMPARE(tabBar->count(), 2);
+  QCOMPARE(first->currentTab()->title(), QStringLiteral("Logs"));
+
+  MainWindow* second = ghostty.activate(
+      {QStringLiteral("qhostty"), QStringLiteral("+new-window")}, directory);
+  QVERIFY(second != first);
+  delete second;
+  delete first;
+}
 
 void WindowActionsTest::splitsSpaceEvenly() {
   GhosttyApp ghostty;
