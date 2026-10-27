@@ -53,8 +53,8 @@ MainWindow::MainWindow(GhosttyApp* app,
   connect(m_tabBar, &QTabBar::currentChanged, m_stack,
           &QStackedWidget::setCurrentIndex);
   connect(m_tabBar, &QTabBar::currentChanged, this, [this](int) {
+    updateWindowTitle();
     if (TerminalTab* tab = currentTab(); tab != nullptr) {
-      setWindowTitle(tab->title());
       if (tab->activeTerminal() != nullptr) {
         tab->activeTerminal()->setFocus(Qt::OtherFocusReason);
       }
@@ -280,24 +280,43 @@ std::optional<bool> MainWindow::handleAction(TerminalWidget* source,
       if (targetIndex < 0 || tab == nullptr) {
         return false;
       }
-      const bool tabTitle =
-          action.action.prompt_title == GHOSTTY_PROMPT_TITLE_TAB;
+      const auto kind = action.action.prompt_title;
       bool accepted = false;
-      const QString current =
-          tabTitle ? tab->title()
-                   : (source != nullptr ? source->title() : QString());
+      QString current;
+      if (kind == GHOSTTY_PROMPT_TITLE_TAB) {
+        current = tab->title();
+      } else if (kind == GHOSTTY_PROMPT_TITLE_WINDOW) {
+        current = windowTitle();
+      } else if (source != nullptr) {
+        current = source->title();
+      }
       const QString title =
           QInputDialog::getText(this, tr("Change title"), tr("Title:"),
                                 QLineEdit::Normal, current, &accepted);
       if (accepted) {
-        if (tabTitle) {
+        if (kind == GHOSTTY_PROMPT_TITLE_TAB) {
           tab->setTitleOverride(title);
+        } else if (kind == GHOSTTY_PROMPT_TITLE_WINDOW) {
+          m_titleOverride = title;
+          updateWindowTitle();
         } else if (source != nullptr) {
           source->setTitle(title);
         }
       }
       return accepted;
     }
+    case GHOSTTY_ACTION_SET_WINDOW_TITLE:
+      m_titleOverride = QString::fromUtf8(action.action.set_title.title);
+      updateWindowTitle();
+      return true;
+    case GHOSTTY_ACTION_MOVE_TAB_TO_NEW_WINDOW:
+      if (targetIndex < 0 || isQuickTerminal()) {
+        return false;
+      }
+      detachTab(targetIndex);
+      return true;
+    case GHOSTTY_ACTION_RESIZE_WINDOW:
+      return resizeTerminal(tab, source, action.action.resize_window);
     case GHOSTTY_ACTION_CLOSE_WINDOW:
       close();
       return true;
@@ -428,8 +447,34 @@ void MainWindow::updateTabTitle(TerminalTab* tab, const QString& title) {
   m_tabBar->setTabText(index, title);
   m_tabBar->setTabToolTip(index, title);
   if (index == m_tabBar->currentIndex()) {
-    setWindowTitle(title);
+    updateWindowTitle();
   }
+}
+
+void MainWindow::updateWindowTitle() {
+  if (!m_titleOverride.isEmpty()) {
+    setWindowTitle(m_titleOverride);
+  } else if (TerminalTab* tab = currentTab(); tab != nullptr) {
+    setWindowTitle(tab->title());
+  }
+}
+
+bool MainWindow::resizeTerminal(TerminalTab* tab,
+                                TerminalWidget* terminal,
+                                const ghostty_action_resize_window_s& size) {
+  // Programs cannot resize a terminal in a split.
+  if (tab == nullptr || terminal == nullptr || tab->terminals().size() != 1 ||
+      isFullScreen() || isMaximized()) {
+    return false;
+  }
+
+  const int width = size.width > 0 ? static_cast<int>(size.width)
+                                   : terminal->width();
+  const int height = size.height > 0 ? static_cast<int>(size.height)
+                                     : terminal->height();
+  resize(this->size() + QSize(width - terminal->width(),
+                              height - terminal->height()));
+  return true;
 }
 
 void MainWindow::updateTabBarVisibility() {

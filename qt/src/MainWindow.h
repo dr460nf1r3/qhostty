@@ -64,6 +64,10 @@ class MainWindow final : public QMainWindow {
   void detachTab(int index);
   void connectTab(TerminalTab* tab);
   void updateTabTitle(TerminalTab* tab, const QString& title);
+  void updateWindowTitle();
+  bool resizeTerminal(TerminalTab* tab,
+                      TerminalWidget* terminal,
+                      const ghostty_action_resize_window_s& size);
   void updateTabBarVisibility();
   bool selectTab(int value);
   void toggleCommandPalette(TerminalWidget* source);
@@ -75,4 +79,5 @@ class MainWindow final : public QMainWindow {
   TabBarVisibility m_tabBarVisibility = TabBarVisibility::Auto;
   QPointer<CommandPalette> m_commandPalette;
   bool m_quickTerminalAutohide = false;
+  QString m_titleOverride;
 };
