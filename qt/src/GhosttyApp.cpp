@@ -56,6 +56,7 @@ struct ActivationOptions {
   QString title;
   float fontSize = 0;
   bool waitAfterCommand = false;
+  bool newTab = false;
 };
 
 QString shellQuote(QString value) {
@@ -69,7 +70,15 @@ ActivationOptions parseActivation(const QStringList& arguments,
   result.workingDirectory = QDir(senderDirectory).absolutePath();
   QStringList commandArguments;
 
-  for (qsizetype index = 1; index < arguments.size(); ++index) {
+  qsizetype first = 1;
+  if (arguments.size() > 1 &&
+      (arguments.at(1) == QStringLiteral("+new-tab") ||
+       arguments.at(1) == QStringLiteral("+new-window"))) {
+    result.newTab = arguments.at(1) == QStringLiteral("+new-tab");
+    first = 2;
+  }
+
+  for (qsizetype index = first; index < arguments.size(); ++index) {
     const QString& argument = arguments.at(index);
     if (argument == QStringLiteral("-e") || argument == QStringLiteral("--")) {
       commandArguments = arguments.mid(index + 1);
@@ -336,9 +345,27 @@ MainWindow* GhosttyApp::activate(const QStringList& arguments,
   config.font_size = options.fontSize;
   config.wait_after_command = options.waitAfterCommand;
 
-  MainWindow* window = createWindow(&config);
-  if (!options.title.isEmpty()) {
-    window->setWindowTitle(options.title);
+  MainWindow* window = nullptr;
+  if (options.newTab) {
+    window = qobject_cast<MainWindow*>(QApplication::activeWindow());
+    for (qsizetype index = m_windows.size() - 1;
+         index >= 0 && (window == nullptr || window->isQuickTerminal());
+         --index) {
+      window = m_windows.at(index);
+    }
+  }
+  if (window != nullptr && !window->isQuickTerminal()) {
+    config.context = GHOSTTY_SURFACE_CONTEXT_TAB;
+    window->addTab(&config);
+    if (!options.title.isEmpty()) {
+      window->currentTab()->setTitleOverride(options.title);
+    }
+    window->show();
+  } else {
+    window = createWindow(&config);
+    if (!options.title.isEmpty()) {
+      window->setWindowTitle(options.title);
+    }
   }
   window->raise();
   window->activateWindow();

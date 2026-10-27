@@ -23,6 +23,8 @@ Qhostty currently provides:
 - Native Qt windows, detachable tabs, nested splits, search, and title UI
 - Keyboard, IME, mouse, smooth scrolling, focus, both clipboards, DPI, and resize handling
 - Single-instance activation with working-directory and command forwarding
+- `qhostty +new-window` and `qhostty +new-tab` open a window or a tab in the running instance
+- Drag and drop of text and files, with paste protection
 - A persistent quick terminal with Plasma Wayland and X11 integration
 - KDE global shortcuts for Ghostty `global:` bindings when KGlobalAccel is available
 - A searchable command palette and an OpenGL terminal inspector
