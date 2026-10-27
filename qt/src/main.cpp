@@ -12,6 +12,7 @@
 #include <QSurfaceFormat>
 
 #include <cstdlib>
+#include <cstring>
 
 #if defined(Q_OS_LINUX)
 #include <unistd.h>
@@ -20,6 +21,18 @@
 #include <ghostty.h>
 
 int main(int argc, char** argv) {
+  // The running instance handles +new-window and +new-tab. Ghostty's own
+  // handlers for these actions do not support embedded apps.
+  QString openAction;
+  if (argc > 1 && (std::strcmp(argv[1], "+new-window") == 0 ||
+                   std::strcmp(argv[1], "+new-tab") == 0)) {
+    openAction = QString::fromLatin1(argv[1]);
+    for (int index = 1; index < argc; ++index) {
+      argv[index] = argv[index + 1];
+    }
+    --argc;
+  }
+
   if (ghostty_init(static_cast<uintptr_t>(argc), argv) != 0) {
     return EXIT_FAILURE;
   }
@@ -71,8 +84,12 @@ int main(int argc, char** argv) {
   SingleInstance instance(QDir(runtimeDirectory)
                               .filePath(QStringLiteral("qhostty-") +
                                         QString::fromLatin1(endpointHash)));
+  QStringList arguments = application.arguments();
+  if (!openAction.isEmpty()) {
+    arguments.insert(1, openAction);
+  }
   const SingleInstance::StartResult instanceResult =
-      instance.start(application.arguments(), QDir::currentPath());
+      instance.start(arguments, QDir::currentPath());
   if (instanceResult == SingleInstance::StartResult::Forwarded) {
     return EXIT_SUCCESS;
   }
