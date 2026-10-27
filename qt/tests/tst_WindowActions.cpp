@@ -15,11 +15,13 @@
 #include <QPointer>
 #include <QProgressBar>
 #include <QScrollBar>
+#include <QSplitter>
 #include <QStackedWidget>
 #include <QTabBar>
 #include <QTemporaryFile>
 #include <QtTest>
 
+#include <cmath>
 #include <cstdlib>
 #include <cstring>
 #include <optional>
@@ -86,7 +88,35 @@ class WindowActionsTest final : public QObject {
   void keepsTabAsTerminalInput();
   void controlsTabBarVisibility();
   void routesWindowActions();
+  void splitsSpaceEvenly();
 };
+
+void WindowActionsTest::splitsSpaceEvenly() {
+  GhosttyApp ghostty;
+  QVERIFY(ghostty.initialize());
+  MainWindow window(&ghostty);
+  window.resize(1001, 600);
+  window.show();
+  TerminalTab* tab = window.currentTab();
+  TerminalWidget* source = tab->activeTerminal();
+  QTRY_VERIFY(source->width() > 900);
+  const int total = source->width();
+
+  TerminalWidget* second =
+      tab->newSplit(source, GHOSTTY_SPLIT_DIRECTION_RIGHT);
+  QVERIFY(second != nullptr);
+  auto* splitter = qobject_cast<QSplitter*>(source->parentWidget());
+  QVERIFY(splitter != nullptr);
+  QTRY_VERIFY(std::abs(source->width() - second->width()) <= 2);
+  QTRY_VERIFY(source->width() + second->width() >= total - 2);
+
+  const int half = second->width();
+  TerminalWidget* third = tab->newSplit(second, GHOSTTY_SPLIT_DIRECTION_LEFT);
+  QVERIFY(third != nullptr);
+  QCOMPARE(third->parentWidget(), splitter);
+  QTRY_VERIFY(std::abs(second->width() - third->width()) <= 2);
+  QVERIFY(std::abs(source->width() - half) <= 2);
+}
 
 void WindowActionsTest::routesWindowActions() {
   GhosttyApp ghostty;
