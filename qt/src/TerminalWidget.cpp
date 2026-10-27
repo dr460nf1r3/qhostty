@@ -1,5 +1,6 @@
 #include "TerminalWidget.h"
 
+#include "DropText.h"
 #include "GhosttyApp.h"
 #include "InputCoordinates.h"
 #include "InspectorWindow.h"
@@ -10,6 +11,9 @@
 #include <QCheckBox>
 #include <QClipboard>
 #include <QDesktopServices>
+#include <QDragEnterEvent>
+#include <QDragMoveEvent>
+#include <QDropEvent>
 #include <QFileDialog>
 #include <QFocusEvent>
 #include <QFrame>
@@ -53,6 +57,7 @@ TerminalWidget::TerminalWidget(GhosttyApp* app,
   setFocusPolicy(Qt::StrongFocus);
   setMouseTracking(true);
   setAttribute(Qt::WA_InputMethodEnabled, true);
+  setAcceptDrops(true);
   setUpdateBehavior(QOpenGLWidget::NoPartialUpdate);
 
   m_config = baseConfig != nullptr ? *baseConfig : ghostty_surface_config_new();
@@ -900,6 +905,31 @@ void TerminalWidget::wheelEvent(QWheelEvent* event) {
   const ghostty_input_scroll_mods_t scrollMods = precise ? 1 : 0;
   ghostty_surface_mouse_scroll(m_surface, delta.x(), delta.y(), scrollMods);
   event->accept();
+}
+
+void TerminalWidget::dragEnterEvent(QDragEnterEvent* event) {
+  if (event->mimeData()->hasUrls() || event->mimeData()->hasText()) {
+    event->acceptProposedAction();
+  }
+}
+
+void TerminalWidget::dragMoveEvent(QDragMoveEvent* event) {
+  if (event->mimeData()->hasUrls() || event->mimeData()->hasText()) {
+    event->acceptProposedAction();
+  }
+}
+
+void TerminalWidget::dropEvent(QDropEvent* event) {
+  const QByteArray text = ghosttyDropText(*event->mimeData()).toUtf8();
+  if (m_surface == nullptr || text.isEmpty()) {
+    return;
+  }
+
+  // Paste protection asks for confirmation for unsafe text.
+  ghostty_surface_paste_text(m_surface, text.constData(),
+                             static_cast<uintptr_t>(text.size()));
+  event->acceptProposedAction();
+  setFocus(Qt::OtherFocusReason);
 }
 
 void TerminalWidget::leaveEvent(QEvent* event) {
