@@ -7,6 +7,19 @@ set(QHOSTTY_GHOSTTY_OPTIMIZE Debug CACHE STRING
   "Zig optimization mode used for Ghostty")
 set(QHOSTTY_GHOSTTY_CPU baseline CACHE STRING
   "Zig CPU target used for Ghostty")
+set(QHOSTTY_ZIG_SYSTEM_DIR "" CACHE PATH
+  "Directory with fetched Zig packages for offline builds")
+set(QHOSTTY_GHOSTTY_VERSION "" CACHE STRING
+  "Ghostty version string for builds without Git metadata")
+
+set(QHOSTTY_ZIG_EXTRA_ARGS)
+if(QHOSTTY_ZIG_SYSTEM_DIR)
+  list(APPEND QHOSTTY_ZIG_EXTRA_ARGS --system "${QHOSTTY_ZIG_SYSTEM_DIR}")
+endif()
+if(QHOSTTY_GHOSTTY_VERSION)
+  list(APPEND QHOSTTY_ZIG_EXTRA_ARGS
+    "-Dversion-string=${QHOSTTY_GHOSTTY_VERSION}")
+endif()
 set(GHOSTTY_PREFIX "${CMAKE_BINARY_DIR}/ghostty")
 set(GHOSTTY_SHARED "${GHOSTTY_PREFIX}/lib/ghostty-internal.so")
 set(GHOSTTY_SONAME "${GHOSTTY_PREFIX}/lib/libghostty.so")
@@ -29,6 +42,7 @@ add_custom_target(qhostty_libghostty
     -fsys=fontconfig
     "-Doptimize=${QHOSTTY_GHOSTTY_OPTIMIZE}"
     "-Dcpu=${QHOSTTY_GHOSTTY_CPU}"
+    ${QHOSTTY_ZIG_EXTRA_ARGS}
     --prefix "${GHOSTTY_PREFIX}"
   COMMAND "${CMAKE_COMMAND}" -E create_symlink
     "ghostty-internal.so" "${GHOSTTY_SONAME}"
