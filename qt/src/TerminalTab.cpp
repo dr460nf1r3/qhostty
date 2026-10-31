@@ -1,13 +1,18 @@
 #include "TerminalTab.h"
 
+#include "DragMime.h"
 #include "GhosttyApp.h"
 #include "SplitAlgorithms.h"
 #include "TerminalWidget.h"
 
 #include <QBoxLayout>
+#include <QDrag>
 #include <QMessageBox>
+#include <QMimeData>
+#include <QPointer>
 #include <QSplitter>
 
+#include <algorithm>
 #include <cstring>
 
 TerminalTab::TerminalTab(GhosttyApp* app,
@@ -75,25 +80,34 @@ TerminalWidget* TerminalTab::newSplit(
   auto* terminal = new TerminalWidget(m_app, nullptr, &config);
   source->freeInheritedConfig(config);
   connectTerminal(terminal);
+  placeTerminal(terminal, source, direction);
 
+  setActive(terminal);
+  terminal->setFocus(Qt::ShortcutFocusReason);
+  return terminal;
+}
+
+void TerminalTab::placeTerminal(TerminalWidget* terminal,
+                                TerminalWidget* target,
+                                ghostty_action_split_direction_e direction) {
   const bool horizontal = direction == GHOSTTY_SPLIT_DIRECTION_LEFT ||
                           direction == GHOSTTY_SPLIT_DIRECTION_RIGHT;
   const bool before = direction == GHOSTTY_SPLIT_DIRECTION_LEFT ||
                       direction == GHOSTTY_SPLIT_DIRECTION_UP;
   const Qt::Orientation orientation =
       horizontal ? Qt::Horizontal : Qt::Vertical;
-  // The new terminal gets half of the space of the source terminal.
-  const int available = horizontal ? source->width() : source->height();
+  // The new terminal gets half of the space of the target terminal.
+  const int available = horizontal ? target->width() : target->height();
 
-  if (auto* parentSplitter = qobject_cast<QSplitter*>(source->parentWidget());
+  if (auto* parentSplitter = qobject_cast<QSplitter*>(target->parentWidget());
       parentSplitter != nullptr &&
       parentSplitter->orientation() == orientation) {
-    const int sourceIndex = parentSplitter->indexOf(source);
-    const int terminalIndex = before ? sourceIndex : sourceIndex + 1;
+    const int targetIndex = parentSplitter->indexOf(target);
+    const int terminalIndex = before ? targetIndex : targetIndex + 1;
     QList<int> sizes = parentSplitter->sizes();
     parentSplitter->insertWidget(terminalIndex, terminal);
     sizes.insert(terminalIndex, available / 2);
-    sizes[before ? sourceIndex + 1 : sourceIndex] = available - available / 2;
+    sizes[before ? targetIndex + 1 : targetIndex] = available - available / 2;
     parentSplitter->setSizes(sizes);
   } else {
     auto* splitter = new QSplitter(orientation);
@@ -101,26 +115,26 @@ TerminalWidget* TerminalTab::newSplit(
     splitter->setHandleWidth(1);
 
     if (auto* parentSplitter =
-            qobject_cast<QSplitter*>(source->parentWidget())) {
-      const int sourceIndex = parentSplitter->indexOf(source);
-      parentSplitter->replaceWidget(sourceIndex, splitter);
+            qobject_cast<QSplitter*>(target->parentWidget())) {
+      const int targetIndex = parentSplitter->indexOf(target);
+      parentSplitter->replaceWidget(targetIndex, splitter);
     } else {
-      m_layout->replaceWidget(source, splitter);
+      m_layout->replaceWidget(target, splitter);
     }
 
     if (before) {
       splitter->addWidget(terminal);
-      splitter->addWidget(source);
+      splitter->addWidget(target);
     } else {
-      splitter->addWidget(source);
+      splitter->addWidget(target);
       splitter->addWidget(terminal);
     }
     splitter->setSizes({available / 2, available - available / 2});
   }
 
-  setActive(terminal);
-  terminal->setFocus(Qt::ShortcutFocusReason);
-  return terminal;
+  terminal->show();
+  updateZoomVisibility();
+  updateSplitState();
 }
 
 bool TerminalTab::closeSurface(TerminalWidget* surface) {
@@ -143,11 +157,74 @@ bool TerminalTab::closeSurface(TerminalWidget* surface) {
 
   const QList<TerminalWidget*> remaining = terminals();
   setActive(remaining.isEmpty() ? nullptr : remaining.constFirst());
-  updateSplitDimming();
+  updateSplitState();
   if (m_active != nullptr) {
     m_active->setFocus(Qt::OtherFocusReason);
   }
   return true;
+}
+
+TerminalTab* TerminalTab::tabOf(const QWidget* widget) {
+  for (QWidget* parent = widget != nullptr ? widget->parentWidget() : nullptr;
+       parent != nullptr; parent = parent->parentWidget()) {
+    if (auto* tab = qobject_cast<TerminalTab*>(parent)) {
+      return tab;
+    }
+  }
+  return nullptr;
+}
+
+bool TerminalTab::moveTerminal(TerminalWidget* terminal,
+                               TerminalWidget* target,
+                               ghostty_action_split_direction_e direction) {
+  TerminalTab* source = tabOf(terminal);
+  if (source == nullptr || terminal == target || tabOf(target) != this ||
+      (source == this && terminals().size() < 2)) {
+    return false;
+  }
+
+  source->releaseTerminal(terminal);
+  placeTerminal(terminal, target, direction);
+  connectTerminal(terminal);
+  setActive(terminal);
+  terminal->setFocus(Qt::OtherFocusReason);
+  return true;
+}
+
+void TerminalTab::releaseTerminal(TerminalWidget* terminal) {
+  disconnect(terminal, nullptr, this, nullptr);
+  auto* splitter = qobject_cast<QSplitter*>(terminal->parentWidget());
+  terminal->setParent(nullptr);
+  if (splitter != nullptr) {
+    collapseSplitter(splitter);
+  }
+
+  m_zoomed = false;
+  if (m_active == terminal) {
+    const QList<TerminalWidget*> remaining = terminals();
+    setActive(remaining.isEmpty() ? nullptr : remaining.constFirst());
+  }
+  updateZoomVisibility();
+  updateSplitState();
+}
+
+void TerminalTab::startDrag(TerminalWidget* terminal) {
+  auto* mime = new QMimeData();
+  qhostty::setDragPointer(*mime, qhostty::surfaceMimeType, terminal);
+  auto* drag = new QDrag(this);
+  drag->setMimeData(mime);
+  const QPixmap preview = terminal->grab();
+  if (!preview.isNull()) {
+    drag->setPixmap(preview.scaledToWidth(std::min(preview.width(), 240),
+                                          Qt::SmoothTransformation));
+  }
+
+  drag->exec(Qt::MoveAction);
+  // The drop target took the last terminal. The window removes this tab
+  // after the drag, because the drag still uses it.
+  if (terminals().isEmpty()) {
+    emit emptied(this);
+  }
 }
 
 bool TerminalTab::focusSplit(ghostty_action_goto_split_e direction) {
@@ -259,6 +336,8 @@ void TerminalTab::connectTerminal(TerminalWidget* terminal) {
           [this](TerminalWidget* surface) { closeSurface(surface); });
   connect(terminal, &TerminalWidget::configChanged, this,
           &TerminalTab::configChanged);
+  connect(terminal, &TerminalWidget::dragRequested, this,
+          [this, terminal]() { startDrag(terminal); });
 }
 
 void TerminalTab::setActive(TerminalWidget* terminal) {
@@ -267,15 +346,16 @@ void TerminalTab::setActive(TerminalWidget* terminal) {
   }
   m_active = terminal;
   updateZoomVisibility();
-  updateSplitDimming();
+  updateSplitState();
   emit titleChanged(title());
 }
 
-void TerminalTab::updateSplitDimming() {
+void TerminalTab::updateSplitState() {
   // unfocused-split-opacity dims every split except the active one.
   const QList<TerminalWidget*> all = terminals();
   for (TerminalWidget* terminal : all) {
     terminal->setSplitDimmed(all.size() > 1 && terminal != m_active);
+    terminal->setSplitCount(static_cast<int>(all.size()));
   }
 }
 

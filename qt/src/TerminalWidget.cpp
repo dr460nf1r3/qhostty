@@ -1,11 +1,13 @@
 #include "TerminalWidget.h"
 
+#include "DragMime.h"
 #include "DropText.h"
 #include "GhosttyApp.h"
 #include "InputCoordinates.h"
 #include "InspectorWindow.h"
-#include "MainWindow.h"
 #include "KeyEventTranslation.h"
+#include "MainWindow.h"
+#include "TerminalTab.h"
 
 #include <QAction>
 #include <QApplication>
@@ -13,6 +15,7 @@
 #include <QClipboard>
 #include <QDesktopServices>
 #include <QDragEnterEvent>
+#include <QDragLeaveEvent>
 #include <QDragMoveEvent>
 #include <QDropEvent>
 #include <QFileDialog>
@@ -138,6 +141,35 @@ TerminalWidget::TerminalWidget(GhosttyApp* app,
   m_resizeOverlayTimer->setSingleShot(true);
   connect(m_resizeOverlayTimer, &QTimer::timeout, m_resizeOverlay,
           &QWidget::hide);
+
+  m_dropZone = new QWidget(this);
+  m_dropZone->setObjectName(QStringLiteral("qhostty-drop-zone"));
+  m_dropZone->setAttribute(Qt::WA_TransparentForMouseEvents, true);
+  m_dropZone->setAttribute(Qt::WA_StyledBackground, true);
+  {
+    const QColor highlight = palette().color(QPalette::Highlight);
+    m_dropZone->setStyleSheet(
+        QStringLiteral("#qhostty-drop-zone { background: rgba(%1, %2, %3, 0.35);"
+                       " border: 2px solid %4; }")
+            .arg(highlight.red())
+            .arg(highlight.green())
+            .arg(highlight.blue())
+            .arg(highlight.name()));
+  }
+  m_dropZone->hide();
+
+  // Drag the handle to move this split. drag-handle sets when it shows.
+  m_dragHandle = new QLabel(QStringLiteral("\u2022\u2022\u2022"), this);
+  m_dragHandle->setObjectName(QStringLiteral("qhostty-drag-handle"));
+  m_dragHandle->setAlignment(Qt::AlignCenter);
+  m_dragHandle->setCursor(Qt::OpenHandCursor);
+  m_dragHandle->setToolTip(tr("Drag to move this split"));
+  m_dragHandle->setStyleSheet(QStringLiteral(
+      "#qhostty-drag-handle { background: rgba(32, 32, 32, 160); "
+      "color: rgba(255, 255, 255, 200); border-bottom-left-radius: 6px; "
+      "border-bottom-right-radius: 6px; padding: 0px 8px; }"));
+  m_dragHandle->installEventFilter(this);
+  m_dragHandle->hide();
 
   m_statusOverlay = new QLabel(this);
   m_statusOverlay->setObjectName(QStringLiteral("qhostty-status"));
@@ -672,6 +704,7 @@ std::optional<bool> TerminalWidget::handleAction(
       m_appliedConfig = applied;
 
       updateSplitDimming();
+      updateDragHandle();
       m_focusFollowsMouse = false;
       ghostty_config_get(m_appliedConfig, &m_focusFollowsMouse,
                          "focus-follows-mouse",
@@ -1012,18 +1045,91 @@ void TerminalWidget::wheelEvent(QWheelEvent* event) {
 }
 
 void TerminalWidget::dragEnterEvent(QDragEnterEvent* event) {
-  if (event->mimeData()->hasUrls() || event->mimeData()->hasText()) {
-    event->acceptProposedAction();
-  }
+  dragMoveEvent(event);
 }
 
 void TerminalWidget::dragMoveEvent(QDragMoveEvent* event) {
-  if (event->mimeData()->hasUrls() || event->mimeData()->hasText()) {
+  const QMimeData& mime = *event->mimeData();
+  if (mime.hasFormat(QString::fromLatin1(qhostty::surfaceMimeType))) {
+    if (draggedSurface(mime) == nullptr) {
+      event->ignore();
+      m_dropZone->hide();
+      return;
+    }
+    showDropZone(event->position());
+    event->acceptProposedAction();
+    return;
+  }
+  if (mime.hasUrls() || mime.hasText()) {
     event->acceptProposedAction();
   }
 }
 
+void TerminalWidget::dragLeaveEvent(QDragLeaveEvent* event) {
+  m_dropZone->hide();
+  QOpenGLWidget::dragLeaveEvent(event);
+}
+
+TerminalWidget* TerminalWidget::draggedSurface(const QMimeData& mime) const {
+  auto* source =
+      qhostty::dragPointer<TerminalWidget>(mime, qhostty::surfaceMimeType);
+  if (source == nullptr || source == this || !m_app->hasSurface(source)) {
+    return nullptr;
+  }
+  if (TerminalTab::tabOf(source) == nullptr ||
+      TerminalTab::tabOf(this) == nullptr) {
+    return nullptr;
+  }
+  return source;
+}
+
+ghostty_action_split_direction_e TerminalWidget::dropDirection(
+    const QPointF& position) const {
+  // The nearest edge, relative to the size of the terminal.
+  const double x = position.x() / std::max(1, width()) - 0.5;
+  const double y = position.y() / std::max(1, height()) - 0.5;
+  if (std::abs(x) > std::abs(y)) {
+    return x < 0 ? GHOSTTY_SPLIT_DIRECTION_LEFT : GHOSTTY_SPLIT_DIRECTION_RIGHT;
+  }
+  return y < 0 ? GHOSTTY_SPLIT_DIRECTION_UP : GHOSTTY_SPLIT_DIRECTION_DOWN;
+}
+
+void TerminalWidget::showDropZone(const QPointF& position) {
+  const int halfWidth = width() / 2;
+  const int halfHeight = height() / 2;
+  QRect zone;
+  switch (dropDirection(position)) {
+    case GHOSTTY_SPLIT_DIRECTION_LEFT:
+      zone = QRect(0, 0, halfWidth, height());
+      break;
+    case GHOSTTY_SPLIT_DIRECTION_RIGHT:
+      zone = QRect(halfWidth, 0, width() - halfWidth, height());
+      break;
+    case GHOSTTY_SPLIT_DIRECTION_UP:
+      zone = QRect(0, 0, width(), halfHeight);
+      break;
+    default:
+      zone = QRect(0, halfHeight, width(), height() - halfHeight);
+      break;
+  }
+  m_dropZone->setGeometry(zone);
+  m_dropZone->show();
+  m_dropZone->raise();
+}
+
 void TerminalWidget::dropEvent(QDropEvent* event) {
+  m_dropZone->hide();
+  if (event->mimeData()->hasFormat(
+          QString::fromLatin1(qhostty::surfaceMimeType))) {
+    TerminalWidget* source = draggedSurface(*event->mimeData());
+    TerminalTab* tab = TerminalTab::tabOf(this);
+    if (source != nullptr && tab != nullptr &&
+        tab->moveTerminal(source, this, dropDirection(event->position()))) {
+      event->acceptProposedAction();
+    }
+    return;
+  }
+
   const QByteArray text = ghosttyDropText(*event->mimeData()).toUtf8();
   if (m_surface == nullptr || text.isEmpty()) {
     return;
@@ -1083,6 +1189,21 @@ bool TerminalWidget::event(QEvent* event) {
 }
 
 bool TerminalWidget::eventFilter(QObject* watched, QEvent* event) {
+  if (watched == m_dragHandle) {
+    auto* mouse = static_cast<QMouseEvent*>(event);
+    if (event->type() == QEvent::MouseButtonPress &&
+        mouse->button() == Qt::LeftButton) {
+      m_dragHandleStart = mouse->position().toPoint();
+      return true;
+    }
+    if (event->type() == QEvent::MouseMove &&
+        (mouse->buttons() & Qt::LeftButton) &&
+        (mouse->position().toPoint() - m_dragHandleStart).manhattanLength() >=
+            QApplication::startDragDistance()) {
+      emit dragRequested();
+      return true;
+    }
+  }
   if (watched == m_searchEdit && event->type() == QEvent::KeyPress) {
     auto* key = static_cast<QKeyEvent*>(event);
     if (key->key() == Qt::Key_Escape) {
@@ -1569,6 +1690,26 @@ void TerminalWidget::setSplitDimmed(bool dimmed) {
   updateSplitDimming();
 }
 
+void TerminalWidget::setSplitCount(int count) {
+  m_splitCount = count;
+  updateDragHandle();
+}
+
+void TerminalWidget::updateDragHandle() {
+  const char* mode = nullptr;
+  ghostty_config_get(m_appliedConfig, static_cast<void*>(&mode), "drag-handle",
+                     std::strlen("drag-handle"));
+  const QByteArray value = mode != nullptr ? QByteArray(mode) : "auto";
+  const bool visible =
+      value == "always" || (value == "auto" && m_splitCount > 1);
+  m_dragHandle->setVisible(visible);
+  if (visible) {
+    m_dragHandle->adjustSize();
+    m_dragHandle->move((width() - m_dragHandle->width()) / 2, 0);
+    m_dragHandle->raise();
+  }
+}
+
 void TerminalWidget::updateSplitDimming() {
   double opacity = 0.7;
   ghostty_config_get(m_appliedConfig, &opacity, "unfocused-split-opacity",
@@ -1599,6 +1740,10 @@ void TerminalWidget::updateSplitDimming() {
 void TerminalWidget::layoutOverlays() {
   m_bellBorder->setGeometry(rect());
   m_dimOverlay->setGeometry(rect());
+  if (!m_dragHandle->isHidden()) {
+    m_dragHandle->move((width() - m_dragHandle->width()) / 2, 0);
+    m_dragHandle->raise();
+  }
   const int scrollWidth = m_scrollBar != nullptr && m_scrollBar->isVisible()
                               ? m_scrollBar->sizeHint().width()
                               : 0;

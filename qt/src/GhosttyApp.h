@@ -49,6 +49,9 @@ class GhosttyApp final : public QObject {
   void unregisterWindow(MainWindow* window);
   void registerSurface(TerminalWidget* widget);
   void unregisterSurface(TerminalWidget* widget);
+  [[nodiscard]] bool hasSurface(TerminalWidget* widget) const {
+    return m_surfaces.contains(widget);
+  }
 
  private:
   static void wakeupCallback(void* userdata);

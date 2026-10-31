@@ -14,6 +14,7 @@
 
 class QAction;
 class QDragEnterEvent;
+class QDragLeaveEvent;
 class QDragMoveEvent;
 class QDropEvent;
 class QEvent;
@@ -25,6 +26,7 @@ class QKeyEvent;
 class QLabel;
 class QLineEdit;
 class QMenu;
+class QMimeData;
 class QMouseEvent;
 class QProgressBar;
 class QResizeEvent;
@@ -73,6 +75,7 @@ class TerminalWidget final : public QOpenGLWidget {
   bool runBindingAction(const QString& action);
   [[nodiscard]] bool bellTitle() const { return m_bellTitle; }
   void setSplitDimmed(bool dimmed);
+  void setSplitCount(int count);
 
  signals:
   void focused();
@@ -82,6 +85,7 @@ class TerminalWidget final : public QOpenGLWidget {
   void configChanged(ghostty_config_t config);
   void bellChanged();
   void surfaceClosing();
+  void dragRequested();
 
  protected:
   void initializeGL() override;
@@ -100,6 +104,7 @@ class TerminalWidget final : public QOpenGLWidget {
   void wheelEvent(QWheelEvent* event) override;
   void dragEnterEvent(QDragEnterEvent* event) override;
   void dragMoveEvent(QDragMoveEvent* event) override;
+  void dragLeaveEvent(QDragLeaveEvent* event) override;
   void dropEvent(QDropEvent* event) override;
   void leaveEvent(QEvent* event) override;
   void focusInEvent(QFocusEvent* event) override;
@@ -137,6 +142,11 @@ class TerminalWidget final : public QOpenGLWidget {
   void updateSplitDimming();
   void showResizeOverlay();
   void clearBell();
+  void updateDragHandle();
+  [[nodiscard]] TerminalWidget* draggedSurface(const QMimeData& mime) const;
+  void showDropZone(const QPointF& position);
+  [[nodiscard]] ghostty_action_split_direction_e dropDirection(
+      const QPointF& position) const;
 
   static ghostty_input_mods_e modifiers(Qt::KeyboardModifiers modifiers);
   static ghostty_input_mouse_button_e mouseButton(Qt::MouseButton button);
@@ -168,6 +178,10 @@ class TerminalWidget final : public QOpenGLWidget {
   QWidget* m_dimOverlay;
   QLabel* m_resizeOverlay;
   QTimer* m_resizeOverlayTimer;
+  QLabel* m_dragHandle;
+  QWidget* m_dropZone;
+  QPoint m_dragHandleStart;
+  int m_splitCount = 1;
   uint16_t m_gridColumns = 0;
   uint16_t m_gridRows = 0;
   bool m_splitDimmed = false;
