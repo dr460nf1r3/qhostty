@@ -127,6 +127,18 @@ TerminalWidget::TerminalWidget(GhosttyApp* app,
           .arg(palette().color(QPalette::Highlight).name()));
   m_bellBorder->hide();
 
+  m_resizeOverlay = new QLabel(this);
+  m_resizeOverlay->setObjectName(QStringLiteral("qhostty-resize-overlay"));
+  m_resizeOverlay->setAttribute(Qt::WA_TransparentForMouseEvents, true);
+  m_resizeOverlay->setStyleSheet(QStringLiteral(
+      "#qhostty-resize-overlay { background: rgba(32, 32, 32, 220); "
+      "color: white; border-radius: 6px; padding: 4px 10px; }"));
+  m_resizeOverlay->hide();
+  m_resizeOverlayTimer = new QTimer(this);
+  m_resizeOverlayTimer->setSingleShot(true);
+  connect(m_resizeOverlayTimer, &QTimer::timeout, m_resizeOverlay,
+          &QWidget::hide);
+
   m_statusOverlay = new QLabel(this);
   m_statusOverlay->setObjectName(QStringLiteral("qhostty-status"));
   m_statusOverlay->setFrameShape(QFrame::StyledPanel);
@@ -809,6 +821,68 @@ void TerminalWidget::resizeGL(int, int) {
 void TerminalWidget::resizeEvent(QResizeEvent* event) {
   QOpenGLWidget::resizeEvent(event);
   layoutOverlays();
+  // Show the overlay after Ghostty has the new size.
+  QTimer::singleShot(0, this, &TerminalWidget::showResizeOverlay);
+}
+
+void TerminalWidget::showResizeOverlay() {
+  if (m_surface == nullptr) {
+    return;
+  }
+  const ghostty_surface_size_s size = ghostty_surface_size(m_surface);
+  if (size.columns == 0 || size.rows == 0 ||
+      (size.columns == m_gridColumns && size.rows == m_gridRows)) {
+    return;
+  }
+  const bool first = m_gridColumns == 0;
+  m_gridColumns = size.columns;
+  m_gridRows = size.rows;
+
+  const char* mode = nullptr;
+  ghostty_config_get(m_appliedConfig, static_cast<void*>(&mode),
+                     "resize-overlay", std::strlen("resize-overlay"));
+  const QByteArray overlay = mode == nullptr ? "after-first" : mode;
+  if (overlay == "never" || (overlay == "after-first" && first)) {
+    return;
+  }
+
+  m_resizeOverlay->setText(
+      QStringLiteral("%1 x %2").arg(size.columns).arg(size.rows));
+  m_resizeOverlay->adjustSize();
+
+  const char* position = nullptr;
+  ghostty_config_get(m_appliedConfig, static_cast<void*>(&position),
+                     "resize-overlay-position",
+                     std::strlen("resize-overlay-position"));
+  const QByteArray where = position == nullptr ? "center" : position;
+  constexpr int margin = 8;
+  const int left = margin;
+  const int right = width() - m_resizeOverlay->width() - margin;
+  const int centerX = (width() - m_resizeOverlay->width()) / 2;
+  const int top = margin;
+  const int bottom = height() - m_resizeOverlay->height() - margin;
+  const int centerY = (height() - m_resizeOverlay->height()) / 2;
+  int x = centerX;
+  int y = centerY;
+  if (where.startsWith("top")) {
+    y = top;
+  } else if (where.startsWith("bottom")) {
+    y = bottom;
+  }
+  if (where.endsWith("left")) {
+    x = left;
+  } else if (where.endsWith("right")) {
+    x = right;
+  }
+  m_resizeOverlay->move(x, y);
+  m_resizeOverlay->show();
+  m_resizeOverlay->raise();
+
+  uint64_t duration = 750000000;
+  ghostty_config_get(m_appliedConfig, &duration, "resize-overlay-duration",
+                     std::strlen("resize-overlay-duration"));
+  m_resizeOverlayTimer->start(static_cast<int>(
+      std::min<uint64_t>(duration / 1000000, std::numeric_limits<int>::max())));
 }
 
 void TerminalWidget::keyPressEvent(QKeyEvent* event) {
