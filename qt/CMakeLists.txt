@@ -29,6 +29,7 @@ qt_add_library(qhostty_frontend STATIC
   src/DBusApplication.h
   src/CommandPalette.h
   src/DropText.cpp
+  src/DragMime.h
   src/DropText.h
   src/FramePresenter.cpp
   src/FramePresenter.h

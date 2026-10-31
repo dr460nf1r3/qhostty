@@ -2,16 +2,24 @@
 
 #include "BackgroundBlur.h"
 #include "CommandPalette.h"
+#include "DragMime.h"
 #include "GhosttyApp.h"
 #include "TerminalTab.h"
 #include "TerminalWidget.h"
 
+#include <QApplication>
 #include <QCloseEvent>
+#include <QCursor>
 #include <QDebug>
+#include <QDrag>
+#include <QDropEvent>
 #include <QEvent>
 #include <QInputDialog>
 #include <QLabel>
 #include <QMenu>
+#include <QMimeData>
+#include <QMouseEvent>
+#include <QPointer>
 #include <QShowEvent>
 #include <QStackedWidget>
 #include <QTabBar>
@@ -19,6 +27,7 @@
 #include <QVBoxLayout>
 
 #include <algorithm>
+#include <cmath>
 #include <cstring>
 
 MainWindow::MainWindow(GhosttyApp* app,
@@ -43,6 +52,10 @@ MainWindow::MainWindow(GhosttyApp* app,
   m_tabBar->setTabsClosable(true);
   m_tabBar->setElideMode(Qt::ElideRight);
   m_tabBar->setContextMenuPolicy(Qt::CustomContextMenu);
+  // Tabs can be dragged to other windows, or out to a new window.
+  m_tabBar->installEventFilter(this);
+  // Tabs from other windows can drop on all of the window.
+  setAcceptDrops(true);
   m_tabBar->setAutoFillBackground(true);
 
   auto* central = new QWidget(this);
@@ -460,31 +473,169 @@ void MainWindow::closeTab(int index) {
   }
 }
 
-void MainWindow::detachTab(int index) {
+TerminalTab* MainWindow::takeTab(int index, QString* title) {
   if (index < 0 || index >= m_stack->count()) {
-    return;
+    return nullptr;
   }
-
   auto* tab = qobject_cast<TerminalTab*>(m_stack->widget(index));
   if (tab == nullptr) {
-    return;
+    return nullptr;
   }
-  const QString title = m_tabBar->tabText(index);
+  if (title != nullptr) {
+    *title = m_tabBar->tabText(index);
+  }
   m_stack->removeWidget(tab);
   m_tabBar->removeTab(index);
   updateTabBarVisibility();
+  disconnect(tab, nullptr, this, nullptr);
   tab->setParent(nullptr);
+  return tab;
+}
+
+void MainWindow::closeIfEmpty() {
+  if (m_tabBar->count() != 0) {
+    return;
+  }
+  if (isQuickTerminal()) {
+    setProperty("qhosttyDestroyQuickTerminal", true);
+  }
+  close();
+}
+
+void MainWindow::detachTab(int index, std::optional<QPoint> position) {
+  QString title;
+  TerminalTab* tab = takeTab(index, &title);
+  if (tab == nullptr) {
+    return;
+  }
 
   auto* detached = new MainWindow(m_app, nullptr, nullptr, false);
   detached->adoptTab(tab, title);
   detached->resize(size());
-  detached->show();
-  if (m_tabBar->count() == 0) {
-    if (isQuickTerminal()) {
-      setProperty("qhosttyDestroyQuickTerminal", true);
-    }
-    close();
+  if (position.has_value()) {
+    detached->move(*position);
   }
+  detached->show();
+  closeIfEmpty();
+}
+
+MainWindow* MainWindow::ownerOf(const TerminalTab* tab) {
+  for (QWidget* widget : QApplication::topLevelWidgets()) {
+    auto* window = qobject_cast<MainWindow*>(widget);
+    if (window != nullptr &&
+        window->m_stack->indexOf(const_cast<TerminalTab*>(tab)) >= 0) {
+      return window;
+    }
+  }
+  return nullptr;
+}
+
+bool MainWindow::eventFilter(QObject* watched, QEvent* event) {
+  if (watched != m_tabBar) {
+    return QMainWindow::eventFilter(watched, event);
+  }
+
+  switch (event->type()) {
+    case QEvent::MouseButtonPress: {
+      auto* mouse = static_cast<QMouseEvent*>(event);
+      m_tabDragIndex = mouse->button() == Qt::LeftButton
+                           ? m_tabBar->tabAt(mouse->position().toPoint())
+                           : -1;
+      m_tabDragStart = mouse->position().toPoint();
+      break;
+    }
+    case QEvent::MouseMove: {
+      auto* mouse = static_cast<QMouseEvent*>(event);
+      // Moving along the tab bar reorders tabs. Moving away from it starts
+      // a drag to another window or to a new window.
+      const int distance = std::abs(mouse->position().toPoint().y() -
+                                    m_tabDragStart.y());
+      if (m_tabDragIndex >= 0 && (mouse->buttons() & Qt::LeftButton) &&
+          distance > m_tabBar->height()) {
+        const int index = m_tabDragIndex;
+        m_tabDragIndex = -1;
+        // End the reorder drag of QTabBar first.
+        QMouseEvent release(QEvent::MouseButtonRelease, mouse->position(),
+                            mouse->globalPosition(), Qt::LeftButton,
+                            Qt::NoButton, mouse->modifiers());
+        QCoreApplication::sendEvent(m_tabBar, &release);
+        startTabDrag(index);
+        return true;
+      }
+      break;
+    }
+    case QEvent::MouseButtonRelease:
+      m_tabDragIndex = -1;
+      break;
+    default:
+      break;
+  }
+  return QMainWindow::eventFilter(watched, event);
+}
+
+void MainWindow::startTabDrag(int index) {
+  auto* tab = qobject_cast<TerminalTab*>(m_stack->widget(index));
+  if (tab == nullptr) {
+    return;
+  }
+
+  auto* mime = new QMimeData();
+  qhostty::setDragPointer(*mime, qhostty::tabMimeType, tab);
+  auto* drag = new QDrag(this);
+  drag->setMimeData(mime);
+  drag->setPixmap(m_tabBar->grab(m_tabBar->tabRect(index)));
+
+  const QPointer<TerminalTab> dragged = tab;
+  if (drag->exec(Qt::MoveAction) == Qt::IgnoreAction && dragged != nullptr &&
+      ownerOf(dragged) == this && m_tabBar->count() > 1) {
+    // Dropped outside of every window: open the tab in a new window.
+    detachTab(m_stack->indexOf(dragged), QCursor::pos());
+    return;
+  }
+  // The drop target took the tab. Close this window here, not during the
+  // drop, because the drag still uses it.
+  closeIfEmpty();
+}
+
+void MainWindow::dragEnterEvent(QDragEnterEvent* event) {
+  dragMoveEvent(event);
+}
+
+void MainWindow::dragMoveEvent(QDragMoveEvent* event) {
+  auto* tab = qhostty::dragPointer<TerminalTab>(*event->mimeData(),
+                                                qhostty::tabMimeType);
+  MainWindow* source = tab == nullptr ? nullptr : ownerOf(tab);
+  // A drop on the own window keeps the tab where it is.
+  if (source != nullptr && (source == this || !isQuickTerminal())) {
+    event->acceptProposedAction();
+  } else {
+    event->ignore();
+  }
+}
+
+void MainWindow::dropEvent(QDropEvent* event) {
+  auto* tab = qhostty::dragPointer<TerminalTab>(*event->mimeData(),
+                                                qhostty::tabMimeType);
+  MainWindow* source = tab == nullptr ? nullptr : ownerOf(tab);
+  if (source == nullptr || (source != this && isQuickTerminal())) {
+    return;
+  }
+  event->acceptProposedAction();
+  if (source == this) {
+    return;
+  }
+
+  QString title;
+  tab = source->takeTab(source->m_stack->indexOf(tab), &title);
+  const int index = m_tabBar->isVisible()
+                        ? m_tabBar->tabAt(m_tabBar->mapFrom(
+                              this, event->position().toPoint()))
+                        : -1;
+  adoptTab(tab, title);
+  if (index >= 0) {
+    m_tabBar->moveTab(m_tabBar->currentIndex(), index);
+  }
+  activateWindow();
 }
 
 void MainWindow::connectTab(TerminalTab* tab) {
@@ -494,6 +645,13 @@ void MainWindow::connectTab(TerminalTab* tab) {
   connect(tab, &TerminalTab::closeRequested, this,
           [this](TerminalTab* page) { closeTab(m_stack->indexOf(page)); });
   connect(tab, &TerminalTab::configChanged, this, &MainWindow::applyConfig);
+  connect(tab, &TerminalTab::emptied, this, [this](TerminalTab* page) {
+    // The last split moved to another tab.
+    if (TerminalTab* taken = takeTab(m_stack->indexOf(page), nullptr)) {
+      taken->deleteLater();
+    }
+    closeIfEmpty();
+  });
 }
 
 void MainWindow::updateTabTitle(TerminalTab* tab, const QString& title) {
