@@ -1,0 +1,4 @@
+[D-BUS Service]
+Name=@QHOSTTY_APP_ID@
+SystemdService=app-@QHOSTTY_APP_ID@.service
+Exec=@QHOSTTY_EXECUTABLE@ --initial-window=false

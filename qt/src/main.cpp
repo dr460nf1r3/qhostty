@@ -1,5 +1,7 @@
+#include "DBusApplication.h"
 #include "GhosttyApp.h"
 #include "SingleInstance.h"
+#include "SystemdIntegration.h"
 
 #include <QApplication>
 #include <QCryptographicHash>
@@ -20,6 +22,8 @@
 #include <ghostty.h>
 
 int main(int argc, char** argv) {
+  SystemdIntegration::takeNotifySocket();
+
   // The running instance handles +new-window and +new-tab. Ghostty's own
   // handlers for these actions do not support embedded apps.
   QString openAction;
@@ -106,7 +110,28 @@ int main(int argc, char** argv) {
 
   QObject::connect(&instance, &SingleInstance::activationRequested, &ghostty,
                    &GhosttyApp::activate);
-  ghostty.createWindow();
+
+  SystemdIntegration systemd;
+  QObject::connect(&systemd, &SystemdIntegration::reloadRequested, &ghostty,
+                   [&ghostty]() {
+                     SystemdIntegration::notifyReloading();
+                     ghostty.reloadConfig();
+                     SystemdIntegration::notifyReady();
+                   });
+
+  auto* dbus = new DBusApplication(&ghostty);
+  if (!dbus->registerOnSessionBus(QGuiApplication::desktopFileName())) {
+    qInfo("D-Bus activation is unavailable");
+  }
+
+  // The systemd service starts without a window and waits for activation.
+  bool initialWindow = true;
+  ghostty_config_get(ghostty.config(), &initialWindow, "initial-window",
+                     std::strlen("initial-window"));
+  if (initialWindow) {
+    ghostty.createWindow();
+  }
+  SystemdIntegration::notifyReady();
 
   return application.exec();
 }
