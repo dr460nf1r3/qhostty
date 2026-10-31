@@ -10,6 +10,7 @@
 #include <QDebug>
 #include <QEvent>
 #include <QInputDialog>
+#include <QLabel>
 #include <QMenu>
 #include <QShowEvent>
 #include <QStackedWidget>
@@ -469,6 +470,29 @@ void MainWindow::updateTabTitle(TerminalTab* tab, const QString& title) {
   if (index == m_tabBar->currentIndex()) {
     updateWindowTitle();
   }
+}
+
+void MainWindow::showToast(const QString& message) {
+  if (m_toast == nullptr) {
+    m_toast = new QLabel(centralWidget());
+    m_toast->setObjectName(QStringLiteral("qhostty-toast"));
+    m_toast->setAttribute(Qt::WA_TransparentForMouseEvents, true);
+    m_toast->setStyleSheet(QStringLiteral(
+        "#qhostty-toast { background: rgba(32, 32, 32, 220); color: white; "
+        "border-radius: 8px; padding: 8px 16px; }"));
+    m_toastTimer = new QTimer(this);
+    m_toastTimer->setSingleShot(true);
+    connect(m_toastTimer, &QTimer::timeout, m_toast, &QWidget::hide);
+  }
+
+  m_toast->setText(message);
+  m_toast->adjustSize();
+  const QWidget* area = centralWidget();
+  m_toast->move((area->width() - m_toast->width()) / 2,
+                area->height() - m_toast->height() - 24);
+  m_toast->show();
+  m_toast->raise();
+  m_toastTimer->start(3000);
 }
 
 void MainWindow::updateWindowTitle() {
