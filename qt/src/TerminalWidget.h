@@ -72,6 +72,7 @@ class TerminalWidget final : public QOpenGLWidget {
       const ghostty_action_s& action);
   bool runBindingAction(const QString& action);
   [[nodiscard]] bool bellTitle() const { return m_bellTitle; }
+  void setSplitDimmed(bool dimmed);
 
  signals:
   void focused();
@@ -133,6 +134,7 @@ class TerminalWidget final : public QOpenGLWidget {
   void updateKeyState();
   void layoutOverlays();
   void ringBell();
+  void updateSplitDimming();
   void clearBell();
 
   static ghostty_input_mods_e modifiers(Qt::KeyboardModifiers modifiers);
@@ -162,6 +164,8 @@ class TerminalWidget final : public QOpenGLWidget {
   QLabel* m_searchCount;
   QLabel* m_statusOverlay;
   QFrame* m_bellBorder;
+  QWidget* m_dimOverlay;
+  bool m_splitDimmed = false;
   bool m_bellTitle = false;
   QLabel* m_readonlyBadge;
   QLabel* m_keyStateBadge;

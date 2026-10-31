@@ -121,6 +121,11 @@ void MainWindow::applyConfig(ghostty_config_t config) {
     m_tabBarVisibility = TabBarVisibility::Auto;
   }
   updateTabBarVisibility();
+  for (int index = 0; index < m_stack->count(); ++index) {
+    if (auto* tab = qobject_cast<TerminalTab*>(m_stack->widget(index))) {
+      tab->applyConfig(config);
+    }
+  }
 
   const char* tabPosition = nullptr;
   m_newTabAtEnd = config != nullptr &&
