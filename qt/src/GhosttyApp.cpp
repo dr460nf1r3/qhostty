@@ -8,6 +8,8 @@
 #include "TerminalWidget.h"
 
 #include <QApplication>
+#include <QMessageBox>
+#include <QPushButton>
 #ifdef QHOSTTY_HAS_MULTIMEDIA
 #include <QAudioOutput>
 #include <QMediaPlayer>
@@ -210,6 +212,7 @@ bool GhosttyApp::initialize() {
     return false;
   }
   logDiagnostics(m_config);
+  showConfigErrors(m_config);
 
   ghostty_runtime_config_s runtime{};
   runtime.userdata = this;
@@ -268,6 +271,8 @@ bool GhosttyApp::reloadConfig(bool soft) {
     return false;
   }
   logDiagnostics(replacement);
+  showConfigErrors(replacement);
+  showReloadNotification(replacement);
 
   ghostty_app_update_config(m_app, replacement);
   ghostty_config_free(replacement);
@@ -293,6 +298,8 @@ bool GhosttyApp::reloadConfig(TerminalWidget* widget, bool soft) {
     return false;
   }
   logDiagnostics(replacement);
+  showConfigErrors(replacement);
+  showReloadNotification(replacement);
   ghostty_surface_update_config(widget->surface(), replacement);
   ghostty_config_free(replacement);
   if (m_backgroundOpaque) {
@@ -335,6 +342,61 @@ void GhosttyApp::syncBackgroundOpacity() {
 void GhosttyApp::applyBackgroundOpacity(TerminalWidget* widget) {
   if (m_opaqueConfig != nullptr && widget->surface() != nullptr) {
     ghostty_surface_update_config(widget->surface(), m_opaqueConfig);
+  }
+}
+
+void GhosttyApp::showConfigErrors(ghostty_config_t config) {
+  const uint32_t count = ghostty_config_diagnostics_count(config);
+  if (count == 0) {
+    if (m_configErrors != nullptr) {
+      m_configErrors->close();
+    }
+    return;
+  }
+
+  QStringList messages;
+  for (uint32_t index = 0; index < count; ++index) {
+    messages.append(QString::fromUtf8(
+        ghostty_config_get_diagnostic(config, index).message));
+  }
+
+  // Show the dialog after the windows that open now, so it stays on top.
+  QTimer::singleShot(0, this, [this, messages]() {
+    showConfigErrorDialog(messages);
+  });
+}
+
+void GhosttyApp::showConfigErrorDialog(const QStringList& messages) {
+  if (m_configErrors == nullptr) {
+    m_configErrors = new QMessageBox(QMessageBox::Warning,
+                                     tr("Configuration Errors"), QString());
+    m_configErrors->setAttribute(Qt::WA_DeleteOnClose, true);
+    m_configErrors->setWindowModality(Qt::NonModal);
+    m_configErrors->addButton(tr("Ignore"), QMessageBox::RejectRole);
+    QPushButton* reload = m_configErrors->addButton(
+        tr("Reload Configuration"), QMessageBox::AcceptRole);
+    connect(reload, &QPushButton::clicked, this, [this]() { reloadConfig(); });
+  }
+  m_configErrors->setText(
+      tr("One or more configuration errors were found. Fix the errors and "
+         "reload the configuration, or ignore them."));
+  m_configErrors->setInformativeText(messages.join(QLatin1Char('\n')));
+  m_configErrors->show();
+  m_configErrors->raise();
+}
+
+void GhosttyApp::showReloadNotification(ghostty_config_t config) {
+  // app-notifications: bit 0 is clipboard-copy, bit 1 is config-reload.
+  uint32_t notifications = 0b11;
+  ghostty_config_get(config, &notifications, "app-notifications",
+                     std::strlen("app-notifications"));
+  if ((notifications & 0b10) == 0) {
+    return;
+  }
+  for (MainWindow* window : m_windows) {
+    if (window != nullptr && window->isVisible()) {
+      window->showToast(tr("Reloaded the configuration"));
+    }
   }
 }
 
