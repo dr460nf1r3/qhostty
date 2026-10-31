@@ -1,5 +1,6 @@
 #include "GhosttyApp.h"
 
+#include "CgroupScope.h"
 #include "GlobalShortcuts.h"
 #include "MainWindow.h"
 #include "QuickTerminal.h"
@@ -222,6 +223,7 @@ bool GhosttyApp::initialize() {
     qCritical() << "Failed to create Ghostty application";
     return false;
   }
+  installCgroupScopeCallback(m_app);
 
   m_globalShortcuts = new GlobalShortcuts(this, this);
   m_globalShortcuts->refresh(m_config);

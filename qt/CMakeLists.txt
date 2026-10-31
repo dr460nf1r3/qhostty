@@ -19,6 +19,8 @@ include(cmake/Ghostty.cmake)
 
 qt_add_library(qhostty_frontend STATIC
   src/BackgroundBlur.h
+  src/CgroupScope.cpp
+  src/CgroupScope.h
   src/CommandPalette.cpp
   src/CommandPalette.h
   src/DropText.cpp
