@@ -41,20 +41,19 @@ MainWindow::MainWindow(GhosttyApp* app,
   m_tabBar->setDocumentMode(true);
   m_tabBar->setMovable(true);
   m_tabBar->setTabsClosable(true);
-  m_tabBar->setExpanding(false);
   m_tabBar->setElideMode(Qt::ElideRight);
   m_tabBar->setContextMenuPolicy(Qt::CustomContextMenu);
   m_tabBar->setAutoFillBackground(true);
-  applyConfig(m_app->config());
 
   auto* central = new QWidget(this);
-  auto* layout = new QVBoxLayout(central);
-  layout->setContentsMargins(0, 0, 0, 0);
-  layout->setSpacing(0);
-  layout->addWidget(m_tabBar);
-  layout->addWidget(m_stack, 1);
+  m_layout = new QVBoxLayout(central);
+  m_layout->setContentsMargins(0, 0, 0, 0);
+  m_layout->setSpacing(0);
+  m_layout->addWidget(m_tabBar);
+  m_layout->addWidget(m_stack, 1);
   setCentralWidget(central);
   resize(1000, 650);
+  applyConfig(m_app->config());
 
   connect(m_tabBar, &QTabBar::currentChanged, m_stack,
           &QStackedWidget::setCurrentIndex);
@@ -121,6 +120,24 @@ void MainWindow::applyConfig(ghostty_config_t config) {
     m_tabBarVisibility = TabBarVisibility::Auto;
   }
   updateTabBarVisibility();
+
+  bool wideTabs = true;
+  const char* tabsLocation = nullptr;
+  if (config != nullptr) {
+    ghostty_config_get(config, &wideTabs, "gtk-wide-tabs",
+                       std::strlen("gtk-wide-tabs"));
+    ghostty_config_get(config, static_cast<void*>(&tabsLocation),
+                       "gtk-tabs-location", std::strlen("gtk-tabs-location"));
+  }
+  m_tabBar->setExpanding(wideTabs);
+  const bool bottom =
+      tabsLocation != nullptr && std::strcmp(tabsLocation, "bottom") == 0;
+  m_tabBar->setShape(bottom ? QTabBar::RoundedSouth : QTabBar::RoundedNorth);
+  if (m_layout != nullptr) {
+    m_layout->removeWidget(m_tabBar);
+    m_layout->insertWidget(bottom ? 1 : 0, m_tabBar);
+  }
+
   for (int index = 0; index < m_stack->count(); ++index) {
     if (auto* tab = qobject_cast<TerminalTab*>(m_stack->widget(index))) {
       tab->applyConfig(config);
@@ -494,6 +511,13 @@ void MainWindow::updateTabTitle(TerminalTab* tab, const QString& title) {
 void MainWindow::applyStartupState(ghostty_config_t config) {
   if (config == nullptr) {
     return;
+  }
+
+  const char* decoration = nullptr;
+  ghostty_config_get(config, static_cast<void*>(&decoration),
+                     "window-decoration", std::strlen("window-decoration"));
+  if (decoration != nullptr && std::strcmp(decoration, "none") == 0) {
+    setWindowFlag(Qt::FramelessWindowHint, true);
   }
 
   bool maximize = false;

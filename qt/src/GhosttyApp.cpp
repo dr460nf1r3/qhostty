@@ -252,6 +252,7 @@ bool GhosttyApp::initialize() {
 
   ghostty_app_set_focus(m_app,
                         qGuiApp->applicationState() == Qt::ApplicationActive);
+  applyWindowTheme();
   syncColorScheme();
   return true;
 }
@@ -738,6 +739,7 @@ bool GhosttyApp::handleAction(ghostty_target_s target,
       }
       ghostty_config_free(m_config);
       m_config = applied;
+      applyWindowTheme();
       if (m_globalShortcuts != nullptr) {
         m_globalShortcuts->refresh(m_config);
       }
@@ -828,6 +830,23 @@ void GhosttyApp::tick() {
   if (m_app != nullptr) {
     ghostty_app_tick(m_app);
   }
+}
+
+void GhosttyApp::applyWindowTheme() {
+#if QT_VERSION >= QT_VERSION_CHECK(6, 8, 0)
+  // As in GTK Ghostty, only light and dark force a color scheme. The
+  // other values follow the desktop.
+  const char* theme = nullptr;
+  ghostty_config_get(m_config, static_cast<void*>(&theme), "window-theme",
+                     std::strlen("window-theme"));
+  Qt::ColorScheme scheme = Qt::ColorScheme::Unknown;
+  if (theme != nullptr && std::strcmp(theme, "light") == 0) {
+    scheme = Qt::ColorScheme::Light;
+  } else if (theme != nullptr && std::strcmp(theme, "dark") == 0) {
+    scheme = Qt::ColorScheme::Dark;
+  }
+  QGuiApplication::styleHints()->setColorScheme(scheme);
+#endif
 }
 
 void GhosttyApp::syncColorScheme() {

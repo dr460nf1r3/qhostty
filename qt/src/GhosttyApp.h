@@ -80,6 +80,7 @@ class GhosttyApp final : public QObject {
   void scheduleQuitTimer();
   void tick();
   void syncColorScheme();
+  void applyWindowTheme();
   void syncBackgroundOpacity();
 
   static TerminalWidget* widgetForTarget(ghostty_target_s target);
