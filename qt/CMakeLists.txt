@@ -11,6 +11,7 @@ find_package(OpenGL REQUIRED COMPONENTS EGL)
 if(NOT TARGET Qt6::GuiPrivate)
   find_package(Qt6 REQUIRED COMPONENTS GuiPrivate)
 endif()
+find_package(Qt6 6.5 QUIET COMPONENTS Multimedia)
 find_package(LayerShellQt QUIET)
 find_package(KF6WindowSystem QUIET)
 find_package(KF6GlobalAccel QUIET)
@@ -70,6 +71,11 @@ target_link_libraries(qhostty_frontend PUBLIC
   OpenGL::EGL
 )
 target_link_libraries(qhostty_frontend PRIVATE Qt6::GuiPrivate)
+if(TARGET Qt6::Multimedia)
+  target_link_libraries(qhostty_frontend PRIVATE Qt6::Multimedia)
+  target_compile_definitions(qhostty_frontend PRIVATE
+    QHOSTTY_HAS_MULTIMEDIA=1)
+endif()
 if(TARGET LayerShellQt::Interface)
   target_link_libraries(qhostty_frontend PRIVATE LayerShellQt::Interface)
   target_compile_definitions(qhostty_frontend PRIVATE
