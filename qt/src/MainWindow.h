@@ -71,6 +71,7 @@ class MainWindow final : public QMainWindow {
   void updateTabTitle(TerminalTab* tab, const QString& title);
   void updateWindowTitle();
   void applyBackgroundBlur();
+  void applyStartupState(ghostty_config_t config);
   bool resizeTerminal(TerminalTab* tab,
                       TerminalWidget* terminal,
                       const ghostty_action_resize_window_s& size);
@@ -89,4 +90,5 @@ class MainWindow final : public QMainWindow {
   QLabel* m_toast = nullptr;
   QTimer* m_toastTimer = nullptr;
   bool m_backgroundBlur = false;
+  bool m_newTabAtEnd = false;
 };
