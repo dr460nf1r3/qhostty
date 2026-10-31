@@ -798,7 +798,7 @@ void GhosttyApp::sendNotification(const QString& title, const QString& body) {
       QStringLiteral("org.freedesktop.Notifications"),
       QStringLiteral("Notify"));
   message << QStringLiteral("Qhostty") << uint(0)
-          << QStringLiteral("io.github.angristan.qhostty") << title << body
+          << QGuiApplication::desktopFileName() << title << body
           << QStringList() << QVariantMap() << -1;
   QDBusConnection::sessionBus().asyncCall(message);
 }
