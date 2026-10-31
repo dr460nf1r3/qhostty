@@ -135,6 +135,7 @@ class TerminalWidget final : public QOpenGLWidget {
   void layoutOverlays();
   void ringBell();
   void updateSplitDimming();
+  void showResizeOverlay();
   void clearBell();
 
   static ghostty_input_mods_e modifiers(Qt::KeyboardModifiers modifiers);
@@ -165,6 +166,10 @@ class TerminalWidget final : public QOpenGLWidget {
   QLabel* m_statusOverlay;
   QFrame* m_bellBorder;
   QWidget* m_dimOverlay;
+  QLabel* m_resizeOverlay;
+  QTimer* m_resizeOverlayTimer;
+  uint16_t m_gridColumns = 0;
+  uint16_t m_gridRows = 0;
   bool m_splitDimmed = false;
   bool m_bellTitle = false;
   QLabel* m_readonlyBadge;
