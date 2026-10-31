@@ -95,7 +95,33 @@ class WindowActionsTest final : public QObject {
   void splitsSpaceEvenly();
   void buildsDropText();
   void opensForwardedTabsAndWindows();
+  void insertsNewTabs();
 };
+
+void WindowActionsTest::insertsNewTabs() {
+  GhosttyApp ghostty;
+  QVERIFY(ghostty.initialize());
+  MainWindow window(&ghostty);
+  auto* stack = window.findChild<QStackedWidget*>();
+  window.addTab();
+  window.addTab();
+  QCOMPARE(stack->count(), 3);
+
+  // The default "current" puts a new tab after the selected tab.
+  auto* tabBar = window.findChild<QTabBar*>(QStringLiteral("qhostty-tabs"));
+  tabBar->setCurrentIndex(0);
+  const int current = window.addTab();
+  QCOMPARE(current, 1);
+  QCOMPARE(tabBar->currentIndex(), 1);
+  QCOMPARE(stack->currentIndex(), 1);
+
+  ghostty_config_t config = configFromText("window-new-tab-position = end\n");
+  QVERIFY(config != nullptr);
+  window.applyConfig(config);
+  ghostty_config_free(config);
+  tabBar->setCurrentIndex(0);
+  QCOMPARE(window.addTab(), 4);
+}
 
 void WindowActionsTest::buildsDropText() {
   QCOMPARE(ghosttyShellEscape(QStringLiteral("a b'$(c)")),
