@@ -228,7 +228,7 @@ if(BUILD_TESTING)
 endif()
 
 include(GNUInstallDirs)
-set(QHOSTTY_APP_ID "io.github.angristan.qhostty")
+set(QHOSTTY_APP_ID "io.github.dr460nf1r3.qhostty")
 
 install(TARGETS qhostty RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}")
 install(FILES "${GHOSTTY_SHARED}"

@@ -7,5 +7,5 @@ Actions=OpenQhosttyHere
 
 [Desktop Action OpenQhosttyHere]
 Name=Open Qhostty Here
-Icon=io.github.angristan.qhostty
+Icon=io.github.dr460nf1r3.qhostty
 Exec=qhostty --working-directory=%f
