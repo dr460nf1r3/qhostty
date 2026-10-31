@@ -90,6 +90,9 @@ MainWindow::MainWindow(GhosttyApp* app,
           });
 
   m_app->registerWindow(this);
+  if (m_role == Role::Normal) {
+    applyStartupState(m_app->config());
+  }
   if (createInitialTab) {
     addTab(baseConfig);
   }
@@ -119,6 +122,14 @@ void MainWindow::applyConfig(ghostty_config_t config) {
   }
   updateTabBarVisibility();
 
+  const char* tabPosition = nullptr;
+  m_newTabAtEnd = config != nullptr &&
+                  ghostty_config_get(config, static_cast<void*>(&tabPosition),
+                                     "window-new-tab-position",
+                                     std::strlen("window-new-tab-position")) &&
+                  tabPosition != nullptr &&
+                  std::strcmp(tabPosition, "end") == 0;
+
   int16_t blur = 0;
   m_backgroundBlur = config != nullptr &&
                      ghostty_config_get(config, &blur, "background-blur",
@@ -147,7 +158,10 @@ int MainWindow::adoptTab(TerminalTab* tab, const QString& title) {
     return -1;
   }
   tab->setParent(m_stack);
-  const int index = m_stack->addWidget(tab);
+  const int index = m_newTabAtEnd || m_stack->count() == 0
+                        ? m_stack->count()
+                        : m_tabBar->currentIndex() + 1;
+  m_stack->insertWidget(index, tab);
   m_tabBar->insertTab(index, title);
   m_tabBar->setCurrentIndex(index);
   updateTabBarVisibility();
@@ -469,6 +483,32 @@ void MainWindow::updateTabTitle(TerminalTab* tab, const QString& title) {
   m_tabBar->setTabToolTip(index, title);
   if (index == m_tabBar->currentIndex()) {
     updateWindowTitle();
+  }
+}
+
+void MainWindow::applyStartupState(ghostty_config_t config) {
+  if (config == nullptr) {
+    return;
+  }
+
+  bool maximize = false;
+  ghostty_config_get(config, &maximize, "maximize", std::strlen("maximize"));
+  const char* fullscreen = nullptr;
+  ghostty_config_get(config, static_cast<void*>(&fullscreen), "fullscreen",
+                     std::strlen("fullscreen"));
+  if (fullscreen != nullptr && std::strcmp(fullscreen, "false") != 0) {
+    setWindowState(windowState() | Qt::WindowFullScreen);
+  } else if (maximize) {
+    setWindowState(windowState() | Qt::WindowMaximized);
+  }
+
+  // The terminal sets the configured title later. Set it now so that the
+  // window has it when it appears.
+  const char* title = nullptr;
+  if (ghostty_config_get(config, static_cast<void*>(&title), "title",
+                         std::strlen("title")) &&
+      title != nullptr && title[0] != '\0') {
+    setWindowTitle(QString::fromUtf8(title));
   }
 }
 
