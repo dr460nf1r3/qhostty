@@ -8,10 +8,13 @@
 #include <QDebug>
 #include <QDir>
 #include <QIcon>
+#include <QLibraryInfo>
+#include <QLocale>
 #include <QOpenGLContext>
 #include <QRegularExpression>
 #include <QStandardPaths>
 #include <QSurfaceFormat>
+#include <QTranslator>
 
 #include <cstdlib>
 #include <cstring>
@@ -106,6 +109,17 @@ int main(int argc, char** argv) {
   QSurfaceFormat::setDefaultFormat(format);
 
   QApplication application(argc, argv);
+  QTranslator qtTranslator;
+  if (qtTranslator.load(QLocale(), QStringLiteral("qtbase"),
+                        QStringLiteral("_"),
+                        QLibraryInfo::path(QLibraryInfo::TranslationsPath))) {
+    QCoreApplication::installTranslator(&qtTranslator);
+  }
+  QTranslator translator;
+  if (translator.load(QLocale(), QStringLiteral("qhostty"),
+                      QStringLiteral("_"), QStringLiteral(":/i18n"))) {
+    QCoreApplication::installTranslator(&translator);
+  }
   // The application name is the class of WM_CLASS on X11, and the desktop
   // file name is the Wayland app ID and the D-Bus name.
   QCoreApplication::setApplicationName(identity.appId);

@@ -6,6 +6,7 @@ set(CMAKE_AUTOUIC ON)
 set(CMAKE_AUTORCC ON)
 
 find_package(Qt6 6.5 REQUIRED COMPONENTS Core DBus Gui Network Widgets OpenGL OpenGLWidgets)
+find_package(Qt6 6.5 REQUIRED COMPONENTS LinguistTools)
 find_package(OpenGL REQUIRED COMPONENTS EGL)
 # Key translation needs QKeyMapper from the Qt GUI private API.
 if(NOT TARGET Qt6::GuiPrivate)
@@ -145,6 +146,11 @@ qt_add_executable(qhostty
 )
 target_compile_options(qhostty PRIVATE -Wall -Wextra -Wpedantic)
 target_link_libraries(qhostty PRIVATE qhostty_frontend)
+qt_add_translations(qhostty
+  TS_FILES translations/qhostty_de.ts
+  RESOURCE_PREFIX /i18n
+  LUPDATE_OPTIONS -no-obsolete -locations none
+)
 set_target_properties(qhostty PROPERTIES
   OUTPUT_NAME qhostty
   BUILD_RPATH "${GHOSTTY_PREFIX}/lib"
