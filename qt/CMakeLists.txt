@@ -12,6 +12,8 @@ if(NOT TARGET Qt6::GuiPrivate)
   find_package(Qt6 REQUIRED COMPONENTS GuiPrivate)
 endif()
 find_package(Qt6 6.5 QUIET COMPONENTS Multimedia)
+find_package(PkgConfig REQUIRED)
+pkg_check_modules(XkbCommon REQUIRED IMPORTED_TARGET xkbcommon)
 find_package(LayerShellQt QUIET)
 find_package(KF6WindowSystem QUIET)
 find_package(KF6GlobalAccel QUIET)
@@ -70,7 +72,10 @@ target_link_libraries(qhostty_frontend PUBLIC
   Qt6::OpenGLWidgets
   OpenGL::EGL
 )
-target_link_libraries(qhostty_frontend PRIVATE Qt6::GuiPrivate)
+target_link_libraries(qhostty_frontend PRIVATE
+  Qt6::GuiPrivate
+  PkgConfig::XkbCommon
+)
 if(TARGET Qt6::Multimedia)
   target_link_libraries(qhostty_frontend PRIVATE Qt6::Multimedia)
   target_compile_definitions(qhostty_frontend PRIVATE
@@ -94,7 +99,6 @@ endif()
 if(TARGET KF6::WindowSystem)
   target_sources(qhostty_frontend PRIVATE src/BackgroundBlurKWindowSystem.cpp)
 else()
-  find_package(PkgConfig REQUIRED)
   pkg_check_modules(WaylandClient REQUIRED IMPORTED_TARGET wayland-client)
   pkg_check_modules(Xcb REQUIRED IMPORTED_TARGET xcb)
   pkg_get_variable(WAYLAND_SCANNER_PATH wayland-scanner wayland_scanner)
