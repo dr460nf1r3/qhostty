@@ -4,6 +4,7 @@
 #include "GhosttyApp.h"
 #include "InputCoordinates.h"
 #include "InspectorWindow.h"
+#include "MainWindow.h"
 #include "KeyEventTranslation.h"
 
 #include <QAction>
@@ -455,7 +456,20 @@ void TerminalWidget::writeClipboard(ghostty_clipboard_e location,
   const QClipboard::Mode mode = location == GHOSTTY_CLIPBOARD_SELECTION
                                     ? QClipboard::Selection
                                     : QClipboard::Clipboard;
+  const bool cleared = mime->text().isEmpty() && mime->formats().isEmpty();
   clipboard->setMimeData(mime, mode);
+
+  // app-notifications: bit 0 is clipboard-copy. Only for the standard
+  // clipboard, as in GTK.
+  uint32_t notifications = 0b11;
+  ghostty_config_get(m_appliedConfig, &notifications, "app-notifications",
+                     std::strlen("app-notifications"));
+  if (mode == QClipboard::Clipboard && (notifications & 0b01) != 0) {
+    if (auto* mainWindow = qobject_cast<MainWindow*>(window())) {
+      mainWindow->showToast(cleared ? tr("Cleared clipboard")
+                                    : tr("Copied to clipboard"));
+    }
+  }
 }
 
 void TerminalWidget::requestClose(bool processAlive) {
