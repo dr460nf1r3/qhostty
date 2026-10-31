@@ -22,6 +22,8 @@ qt_add_library(qhostty_frontend STATIC
   src/CgroupScope.cpp
   src/CgroupScope.h
   src/CommandPalette.cpp
+  src/DBusApplication.cpp
+  src/DBusApplication.h
   src/CommandPalette.h
   src/DropText.cpp
   src/DropText.h
@@ -45,6 +47,8 @@ qt_add_library(qhostty_frontend STATIC
   src/SingleInstance.h
   src/SplitAlgorithms.cpp
   src/SplitAlgorithms.h
+  src/SystemdIntegration.cpp
+  src/SystemdIntegration.h
   src/TerminalTab.cpp
   src/TerminalTab.h
   src/TerminalWidget.cpp
@@ -231,6 +235,18 @@ if(QHOSTTY_INSTALL_GHOSTTY_RESOURCES)
 endif()
 install(FILES resources/linux/${QHOSTTY_APP_ID}.desktop
   DESTINATION "${CMAKE_INSTALL_DATADIR}/applications")
+
+# The systemd user service and D-Bus activation start Qhostty in the
+# background. See README.md.
+set(QHOSTTY_EXECUTABLE "${CMAKE_INSTALL_FULL_BINDIR}/qhostty")
+configure_file(resources/linux/systemd.service.in
+  "${CMAKE_CURRENT_BINARY_DIR}/app-${QHOSTTY_APP_ID}.service" @ONLY)
+configure_file(resources/linux/dbus.service.in
+  "${CMAKE_CURRENT_BINARY_DIR}/${QHOSTTY_APP_ID}.service" @ONLY)
+install(FILES "${CMAKE_CURRENT_BINARY_DIR}/app-${QHOSTTY_APP_ID}.service"
+  DESTINATION "lib/systemd/user")
+install(FILES "${CMAKE_CURRENT_BINARY_DIR}/${QHOSTTY_APP_ID}.service"
+  DESTINATION "${CMAKE_INSTALL_DATADIR}/dbus-1/services")
 install(FILES resources/linux/${QHOSTTY_APP_ID}.metainfo.xml
   DESTINATION "${CMAKE_INSTALL_DATADIR}/metainfo")
 install(FILES resources/linux/${QHOSTTY_APP_ID}-servicemenu.desktop

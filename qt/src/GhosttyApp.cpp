@@ -676,6 +676,12 @@ bool GhosttyApp::handleAction(ghostty_target_s target,
         m_quitDelayRemainingNs = 0;
         return true;
       }
+      if (bool quit = true;
+          ghostty_config_get(m_config, &quit, "quit-after-last-window-closed",
+                             std::strlen("quit-after-last-window-closed")) &&
+          !quit) {
+        return true;
+      }
       m_quitDelayRemainingNs = 0;
       ghostty_config_get(m_config, &m_quitDelayRemainingNs,
                          "quit-after-last-window-closed-delay",
