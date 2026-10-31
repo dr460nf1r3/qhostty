@@ -11,6 +11,8 @@ class CommandPalette;
 class GhosttyApp;
 class QCloseEvent;
 class QEvent;
+class QLabel;
+class QTimer;
 class QShowEvent;
 class QStackedWidget;
 class QTabBar;
@@ -47,6 +49,7 @@ class MainWindow final : public QMainWindow {
     m_quickTerminalAutohide = enabled;
   }
   void applyConfig(ghostty_config_t config);
+  void showToast(const QString& message);
   void closeConfirmed();
 
  protected:
@@ -83,5 +86,7 @@ class MainWindow final : public QMainWindow {
   QPointer<CommandPalette> m_commandPalette;
   bool m_quickTerminalAutohide = false;
   QString m_titleOverride;
+  QLabel* m_toast = nullptr;
+  QTimer* m_toastTimer = nullptr;
   bool m_backgroundBlur = false;
 };
