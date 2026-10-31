@@ -111,6 +111,14 @@ TerminalWidget::TerminalWidget(GhosttyApp* app,
   connect(close, &QPushButton::clicked, this,
           [this]() { runBindingAction(QStringLiteral("end_search")); });
 
+  m_bellBorder = new QFrame(this);
+  m_bellBorder->setObjectName(QStringLiteral("qhostty-bell-border"));
+  m_bellBorder->setAttribute(Qt::WA_TransparentForMouseEvents, true);
+  m_bellBorder->setStyleSheet(
+      QStringLiteral("#qhostty-bell-border { border: 2px solid %1; }")
+          .arg(palette().color(QPalette::Highlight).name()));
+  m_bellBorder->hide();
+
   m_statusOverlay = new QLabel(this);
   m_statusOverlay->setObjectName(QStringLiteral("qhostty-status"));
   m_statusOverlay->setFrameShape(QFrame::StyledPanel);
@@ -516,9 +524,7 @@ std::optional<bool> TerminalWidget::handleAction(
       setMouseVisible(action.action.mouse_visibility == GHOSTTY_MOUSE_VISIBLE);
       return true;
     case GHOSTTY_ACTION_RING_BELL:
-      QApplication::beep();
-      QApplication::alert(window());
-      emit bellRang();
+      ringBell();
       return true;
     case GHOSTTY_ACTION_OPEN_URL: {
       const auto& url = action.action.open_url;
@@ -783,6 +789,7 @@ void TerminalWidget::resizeEvent(QResizeEvent* event) {
 }
 
 void TerminalWidget::keyPressEvent(QKeyEvent* event) {
+  clearBell();
   const ghostty_input_action_e action =
       event->isAutoRepeat() ? GHOSTTY_ACTION_REPEAT : GHOSTTY_ACTION_PRESS;
   const bool handled = sendKey(event, action);
@@ -941,6 +948,7 @@ void TerminalWidget::leaveEvent(QEvent* event) {
 }
 
 void TerminalWidget::focusInEvent(QFocusEvent* event) {
+  clearBell();
   scheduleSurfaceFocus(true);
   emit focused();
   QOpenGLWidget::focusInEvent(event);
@@ -1332,9 +1340,7 @@ void TerminalWidget::commandFinished(
                      "notify-on-command-finish-action",
                      std::strlen("notify-on-command-finish-action"));
   if ((configuredActions & 1U) != 0) {
-    QApplication::beep();
-    QApplication::alert(window());
-    emit bellRang();
+    ringBell();
   }
   if ((configuredActions & 2U) == 0) {
     return;
@@ -1413,7 +1419,55 @@ void TerminalWidget::updateKeyState() {
   layoutOverlays();
 }
 
+void TerminalWidget::ringBell() {
+  // Same defaults as Ghostty: attention and title.
+  uint32_t features = 0b01100;
+  ghostty_config_get(m_appliedConfig, &features, "bell-features",
+                     std::strlen("bell-features"));
+  constexpr uint32_t system = 1U << 0;
+  constexpr uint32_t audio = 1U << 1;
+  constexpr uint32_t attention = 1U << 2;
+  constexpr uint32_t title = 1U << 3;
+  constexpr uint32_t border = 1U << 4;
+
+  if ((features & system) != 0) {
+    QApplication::beep();
+  }
+  if ((features & audio) != 0) {
+    ghostty_config_path_s path{};
+    double volume = 0.5;
+    ghostty_config_get(m_appliedConfig, &volume, "bell-audio-volume",
+                       std::strlen("bell-audio-volume"));
+    if (ghostty_config_get(m_appliedConfig, &path, "bell-audio-path",
+                           std::strlen("bell-audio-path")) &&
+        path.path != nullptr && path.path[0] != '\0') {
+      m_app->playSound(QString::fromUtf8(path.path), volume);
+    }
+  }
+  if ((features & attention) != 0 && !window()->isActiveWindow()) {
+    QApplication::alert(window());
+  }
+  if ((features & border) != 0) {
+    m_bellBorder->show();
+    m_bellBorder->raise();
+    layoutOverlays();
+  }
+  if ((features & title) != 0 && !m_bellTitle) {
+    m_bellTitle = true;
+    emit bellChanged();
+  }
+}
+
+void TerminalWidget::clearBell() {
+  m_bellBorder->hide();
+  if (m_bellTitle) {
+    m_bellTitle = false;
+    emit bellChanged();
+  }
+}
+
 void TerminalWidget::layoutOverlays() {
+  m_bellBorder->setGeometry(rect());
   const int scrollWidth = m_scrollBar != nullptr && m_scrollBar->isVisible()
                               ? m_scrollBar->sizeHint().width()
                               : 0;

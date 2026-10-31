@@ -8,6 +8,10 @@
 #include "TerminalWidget.h"
 
 #include <QApplication>
+#ifdef QHOSTTY_HAS_MULTIMEDIA
+#include <QAudioOutput>
+#include <QMediaPlayer>
+#endif
 #include <QClipboard>
 #include <QCoreApplication>
 #include <QDBusConnection>
@@ -332,6 +336,22 @@ void GhosttyApp::applyBackgroundOpacity(TerminalWidget* widget) {
   if (m_opaqueConfig != nullptr && widget->surface() != nullptr) {
     ghostty_surface_update_config(widget->surface(), m_opaqueConfig);
   }
+}
+
+void GhosttyApp::playSound(const QString& path, double volume) {
+#ifdef QHOSTTY_HAS_MULTIMEDIA
+  if (m_soundPlayer == nullptr) {
+    m_soundPlayer = new QMediaPlayer(this);
+    m_soundPlayer->setAudioOutput(new QAudioOutput(m_soundPlayer));
+  }
+  m_soundPlayer->audioOutput()->setVolume(static_cast<float>(volume));
+  m_soundPlayer->setSource(QUrl::fromLocalFile(path));
+  m_soundPlayer->play();
+#else
+  Q_UNUSED(path);
+  Q_UNUSED(volume);
+  qWarning("Qhostty was built without Qt Multimedia, so bell audio is off");
+#endif
 }
 
 void GhosttyApp::openConfigInWindow(const QString& path) {

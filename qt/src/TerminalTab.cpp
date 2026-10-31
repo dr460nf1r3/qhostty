@@ -26,13 +26,21 @@ QList<TerminalWidget*> TerminalTab::terminals() const {
 }
 
 QString TerminalTab::title() const {
+  QString result = tr("Terminal");
   if (!m_titleOverride.isEmpty()) {
-    return m_titleOverride;
+    result = m_titleOverride;
+  } else if (m_active != nullptr && !m_active->title().isEmpty()) {
+    result = m_active->title();
   }
-  if (m_active != nullptr && !m_active->title().isEmpty()) {
-    return m_active->title();
+
+  // The bell-features title feature marks the tab until the terminal that
+  // rang is focused or gets input.
+  for (const TerminalWidget* terminal : terminals()) {
+    if (terminal->bellTitle()) {
+      return QStringLiteral("\U0001F514 ") + result;
+    }
   }
-  return tr("Terminal");
+  return result;
 }
 
 void TerminalTab::setTitleOverride(const QString& title) {
@@ -239,6 +247,8 @@ void TerminalTab::connectTerminal(TerminalWidget* terminal) {
               emit titleChanged(title());
             }
           });
+  connect(terminal, &TerminalWidget::bellChanged, this,
+          [this]() { emit titleChanged(title()); });
   connect(terminal, &TerminalWidget::tabTitleChanged, this,
           [this](const QString& title) { setTitleOverride(title); });
   connect(terminal, &TerminalWidget::closeRequested, this,
