@@ -16,6 +16,7 @@ class QTimer;
 class QShowEvent;
 class QStackedWidget;
 class QTabBar;
+class QVBoxLayout;
 class TerminalTab;
 class TerminalWidget;
 
@@ -91,4 +92,5 @@ class MainWindow final : public QMainWindow {
   QTimer* m_toastTimer = nullptr;
   bool m_backgroundBlur = false;
   bool m_newTabAtEnd = false;
+  QVBoxLayout* m_layout = nullptr;
 };
