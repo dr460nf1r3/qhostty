@@ -10,6 +10,9 @@
 class CommandPalette;
 class GhosttyApp;
 class QCloseEvent;
+class QDragEnterEvent;
+class QDragMoveEvent;
+class QDropEvent;
 class QEvent;
 class QLabel;
 class QTimer;
@@ -51,10 +54,16 @@ class MainWindow final : public QMainWindow {
   }
   void applyConfig(ghostty_config_t config);
   void showToast(const QString& message);
+  // Returns the window that holds the tab, or nullptr.
+  [[nodiscard]] static MainWindow* ownerOf(const TerminalTab* tab);
   void closeConfirmed();
 
  protected:
   void changeEvent(QEvent* event) override;
+  bool eventFilter(QObject* watched, QEvent* event) override;
+  void dragEnterEvent(QDragEnterEvent* event) override;
+  void dragMoveEvent(QDragMoveEvent* event) override;
+  void dropEvent(QDropEvent* event) override;
   void showEvent(QShowEvent* event) override;
   void closeEvent(QCloseEvent* event) override;
 
@@ -67,7 +76,10 @@ class MainWindow final : public QMainWindow {
 
   TerminalTab* tabFor(TerminalWidget* terminal) const;
   void closeTab(int index);
-  void detachTab(int index);
+  void detachTab(int index, std::optional<QPoint> position = std::nullopt);
+  TerminalTab* takeTab(int index, QString* title);
+  void closeIfEmpty();
+  void startTabDrag(int index);
   void connectTab(TerminalTab* tab);
   void updateTabTitle(TerminalTab* tab, const QString& title);
   void updateWindowTitle();
@@ -88,6 +100,8 @@ class MainWindow final : public QMainWindow {
   QPointer<CommandPalette> m_commandPalette;
   bool m_quickTerminalAutohide = false;
   QString m_titleOverride;
+  QPoint m_tabDragStart;
+  int m_tabDragIndex = -1;
   QLabel* m_toast = nullptr;
   QTimer* m_toastTimer = nullptr;
   bool m_backgroundBlur = false;
