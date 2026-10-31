@@ -12,6 +12,7 @@
 
 class GlobalShortcuts;
 class MainWindow;
+class QMediaPlayer;
 class QTimer;
 class TerminalWidget;
 
@@ -30,6 +31,7 @@ class GhosttyApp final : public QObject {
   [[nodiscard]] ghostty_config_t config() const { return m_config; }
 
   void openConfigInWindow(const QString& path);
+  void playSound(const QString& path, double volume);
   bool toggleBackgroundOpacity();
   void applyBackgroundOpacity(TerminalWidget* widget);
   MainWindow* createWindow(
@@ -89,5 +91,6 @@ class GhosttyApp final : public QObject {
   QSet<TerminalWidget*> m_surfaces;
   std::atomic_bool m_tickQueued = false;
   bool m_backgroundOpaque = false;
+  QMediaPlayer* m_soundPlayer = nullptr;
   ghostty_config_t m_opaqueConfig = nullptr;
 };

@@ -71,6 +71,7 @@ class TerminalWidget final : public QOpenGLWidget {
   [[nodiscard]] std::optional<bool> handleAction(
       const ghostty_action_s& action);
   bool runBindingAction(const QString& action);
+  [[nodiscard]] bool bellTitle() const { return m_bellTitle; }
 
  signals:
   void focused();
@@ -78,7 +79,7 @@ class TerminalWidget final : public QOpenGLWidget {
   void tabTitleChanged(const QString& title);
   void closeRequested(TerminalWidget* widget);
   void configChanged(ghostty_config_t config);
-  void bellRang();
+  void bellChanged();
   void surfaceClosing();
 
  protected:
@@ -131,6 +132,8 @@ class TerminalWidget final : public QOpenGLWidget {
   void updateScrollbar(const ghostty_action_scrollbar_s& scrollbar);
   void updateKeyState();
   void layoutOverlays();
+  void ringBell();
+  void clearBell();
 
   static ghostty_input_mods_e modifiers(Qt::KeyboardModifiers modifiers);
   static ghostty_input_mouse_button_e mouseButton(Qt::MouseButton button);
@@ -158,6 +161,8 @@ class TerminalWidget final : public QOpenGLWidget {
   QLineEdit* m_searchEdit;
   QLabel* m_searchCount;
   QLabel* m_statusOverlay;
+  QFrame* m_bellBorder;
+  bool m_bellTitle = false;
   QLabel* m_readonlyBadge;
   QLabel* m_keyStateBadge;
   QProgressBar* m_progressBar;
