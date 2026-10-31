@@ -7,6 +7,10 @@ set(CMAKE_AUTORCC ON)
 
 find_package(Qt6 6.5 REQUIRED COMPONENTS Core DBus Gui Network Widgets OpenGL OpenGLWidgets)
 find_package(OpenGL REQUIRED COMPONENTS EGL)
+# Key translation needs QKeyMapper from the Qt GUI private API.
+if(NOT TARGET Qt6::GuiPrivate)
+  find_package(Qt6 REQUIRED COMPONENTS GuiPrivate)
+endif()
 find_package(LayerShellQt QUIET)
 find_package(KF6WindowSystem QUIET)
 find_package(KF6GlobalAccel QUIET)
@@ -59,6 +63,7 @@ target_link_libraries(qhostty_frontend PUBLIC
   Qt6::OpenGLWidgets
   OpenGL::EGL
 )
+target_link_libraries(qhostty_frontend PRIVATE Qt6::GuiPrivate)
 if(TARGET LayerShellQt::Interface)
   target_link_libraries(qhostty_frontend PRIVATE LayerShellQt::Interface)
   target_compile_definitions(qhostty_frontend PRIVATE
@@ -77,9 +82,6 @@ endif()
 if(TARGET KF6::WindowSystem)
   target_sources(qhostty_frontend PRIVATE src/BackgroundBlurKWindowSystem.cpp)
 else()
-  if(NOT TARGET Qt6::GuiPrivate)
-    find_package(Qt6 REQUIRED COMPONENTS GuiPrivate)
-  endif()
   find_package(PkgConfig REQUIRED)
   pkg_check_modules(WaylandClient REQUIRED IMPORTED_TARGET wayland-client)
   pkg_check_modules(Xcb REQUIRED IMPORTED_TARGET xcb)
@@ -110,7 +112,6 @@ else()
   target_include_directories(qhostty_frontend PRIVATE
     "${QHOSTTY_PROTOCOL_DIR}")
   target_link_libraries(qhostty_frontend PRIVATE
-    Qt6::GuiPrivate
     PkgConfig::WaylandClient
     PkgConfig::Xcb
   )
@@ -172,6 +173,7 @@ if(BUILD_TESTING)
   target_link_libraries(qhostty_key_event_translation_test PRIVATE
     Qt6::Core
     Qt6::Gui
+    Qt6::GuiPrivate
     Qt6::Test
   )
   add_test(NAME qhostty_key_event_translation
