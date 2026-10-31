@@ -1,16 +1,16 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <component type="desktop-application">
-  <id>io.github.angristan.qhostty</id>
-  <launchable type="desktop-id">io.github.angristan.qhostty.desktop</launchable>
+  <id>io.github.dr460nf1r3.qhostty</id>
+  <launchable type="desktop-id">io.github.dr460nf1r3.qhostty.desktop</launchable>
   <name>Qhostty</name>
   <summary>Qt terminal emulator powered by Ghostty</summary>
   <metadata_license>MIT</metadata_license>
   <project_license>MIT</project_license>
-  <developer id="io.github.angristan">
+  <developer id="io.github.dr460nf1r3">
     <name>Qhostty contributors</name>
   </developer>
-  <url type="homepage">https://github.com/angristan/qhostty</url>
-  <url type="vcs-browser">https://github.com/angristan/qhostty</url>
+  <url type="homepage">https://github.com/dr460nf1r3/qhostty</url>
+  <url type="vcs-browser">https://github.com/dr460nf1r3/qhostty</url>
   <description>
     <p>Qhostty is an experimental native Qt 6 frontend that combines KDE Plasma integration with the terminal, PTY, font, configuration, and OpenGL rendering systems from Ghostty.</p>
     <p>This alpha targets KDE Plasma and provides native windows, tabs, splits, input, and configuration support.</p>
