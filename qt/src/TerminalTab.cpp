@@ -8,6 +8,8 @@
 #include <QMessageBox>
 #include <QSplitter>
 
+#include <cstring>
+
 TerminalTab::TerminalTab(GhosttyApp* app,
                          QWidget* parent,
                          const ghostty_surface_config_s* baseConfig)
@@ -15,6 +17,7 @@ TerminalTab::TerminalTab(GhosttyApp* app,
   m_layout->setContentsMargins(0, 0, 0, 0);
   m_layout->setSpacing(0);
 
+  applyConfig(app->config());
   auto* terminal = new TerminalWidget(app, this, baseConfig);
   m_layout->addWidget(terminal);
   connectTerminal(terminal);
@@ -140,6 +143,7 @@ bool TerminalTab::closeSurface(TerminalWidget* surface) {
 
   const QList<TerminalWidget*> remaining = terminals();
   setActive(remaining.isEmpty() ? nullptr : remaining.constFirst());
+  updateSplitDimming();
   if (m_active != nullptr) {
     m_active->setFocus(Qt::OtherFocusReason);
   }
@@ -263,7 +267,31 @@ void TerminalTab::setActive(TerminalWidget* terminal) {
   }
   m_active = terminal;
   updateZoomVisibility();
+  updateSplitDimming();
   emit titleChanged(title());
+}
+
+void TerminalTab::updateSplitDimming() {
+  // unfocused-split-opacity dims every split except the active one.
+  const QList<TerminalWidget*> all = terminals();
+  for (TerminalWidget* terminal : all) {
+    terminal->setSplitDimmed(all.size() > 1 && terminal != m_active);
+  }
+}
+
+void TerminalTab::applyConfig(ghostty_config_t config) {
+  ghostty_config_color_s color{};
+  if (config != nullptr &&
+      ghostty_config_get(config, &color, "split-divider-color",
+                         std::strlen("split-divider-color"))) {
+    setStyleSheet(QStringLiteral("QSplitter::handle { background: rgb(%1, %2, "
+                                 "%3); }")
+                      .arg(color.r)
+                      .arg(color.g)
+                      .arg(color.b));
+  } else {
+    setStyleSheet(QString());
+  }
 }
 
 void TerminalTab::collapseSplitter(QSplitter* splitter) {

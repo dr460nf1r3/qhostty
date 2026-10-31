@@ -79,6 +79,13 @@ TerminalWidget::TerminalWidget(GhosttyApp* app,
     m_config.initial_input = nullptr;
   }
 
+  // Below the other overlays, so it does not dim them.
+  m_dimOverlay = new QWidget(this);
+  m_dimOverlay->setObjectName(QStringLiteral("qhostty-unfocused-split"));
+  m_dimOverlay->setAttribute(Qt::WA_TransparentForMouseEvents, true);
+  m_dimOverlay->setAttribute(Qt::WA_StyledBackground, true);
+  m_dimOverlay->hide();
+
   m_searchFrame = new QFrame(this);
   m_searchFrame->setObjectName(QStringLiteral("qhostty-search"));
   m_searchFrame->setFrameShape(QFrame::StyledPanel);
@@ -624,6 +631,7 @@ std::optional<bool> TerminalWidget::handleAction(
       return true;
     case GHOSTTY_ACTION_END_SEARCH:
       m_searchFrame->hide();
+      updateSplitDimming();
       setFocus(Qt::OtherFocusReason);
       return true;
     case GHOSTTY_ACTION_SEARCH_TOTAL:
@@ -651,6 +659,7 @@ std::optional<bool> TerminalWidget::handleAction(
       }
       m_appliedConfig = applied;
 
+      updateSplitDimming();
       m_focusFollowsMouse = false;
       ghostty_config_get(m_appliedConfig, &m_focusFollowsMouse,
                          "focus-follows-mouse",
@@ -1266,6 +1275,7 @@ void TerminalWidget::showSearch(const char* needle) {
   m_searchSelected = -1;
   updateSearchCount();
   m_searchFrame->show();
+  updateSplitDimming();
   m_searchFrame->raise();
   layoutOverlays();
   m_searchEdit->setFocus(Qt::ShortcutFocusReason);
@@ -1480,8 +1490,41 @@ void TerminalWidget::clearBell() {
   }
 }
 
+void TerminalWidget::setSplitDimmed(bool dimmed) {
+  m_splitDimmed = dimmed;
+  updateSplitDimming();
+}
+
+void TerminalWidget::updateSplitDimming() {
+  double opacity = 0.7;
+  ghostty_config_get(m_appliedConfig, &opacity, "unfocused-split-opacity",
+                     std::strlen("unfocused-split-opacity"));
+  ghostty_config_color_s fill{};
+  if (!ghostty_config_get(m_appliedConfig, &fill, "unfocused-split-fill",
+                          std::strlen("unfocused-split-fill"))) {
+    ghostty_config_get(m_appliedConfig, &fill, "background",
+                       std::strlen("background"));
+  }
+
+  // As in GTK: not while searching.
+  if (!m_splitDimmed || m_searchFrame->isVisible() || opacity >= 1.0) {
+    m_dimOverlay->hide();
+    return;
+  }
+  m_dimOverlay->setStyleSheet(
+      QStringLiteral(
+          "#qhostty-unfocused-split { background: rgba(%1, %2, %3, %4); }")
+          .arg(fill.r)
+          .arg(fill.g)
+          .arg(fill.b)
+          .arg(1.0 - opacity));
+  m_dimOverlay->setGeometry(rect());
+  m_dimOverlay->show();
+}
+
 void TerminalWidget::layoutOverlays() {
   m_bellBorder->setGeometry(rect());
+  m_dimOverlay->setGeometry(rect());
   const int scrollWidth = m_scrollBar != nullptr && m_scrollBar->isVisible()
                               ? m_scrollBar->sizeHint().width()
                               : 0;

@@ -31,6 +31,7 @@ class TerminalTab final : public QWidget {
   void equalizeSplits();
   void toggleZoom();
   bool canClose() const;
+  void applyConfig(ghostty_config_t config);
 
  signals:
   void titleChanged(const QString& title);
@@ -43,6 +44,7 @@ class TerminalTab final : public QWidget {
   void collapseSplitter(QSplitter* splitter);
   void equalizeSplitter(QSplitter* splitter);
   void updateZoomVisibility();
+  void updateSplitDimming();
 
   GhosttyApp* m_app;
   QBoxLayout* m_layout;
