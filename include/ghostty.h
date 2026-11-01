@@ -86,6 +86,7 @@ typedef enum {
   GHOSTTY_PLATFORM_INVALID,
   GHOSTTY_PLATFORM_MACOS,
   GHOSTTY_PLATFORM_IOS,
+  GHOSTTY_PLATFORM_EGL,
 } ghostty_platform_e;
 
 typedef enum {
@@ -412,6 +413,7 @@ typedef struct {
   const char* GHOSTTY_NULLABLE text;
   uint32_t unshifted_codepoint;
   bool composing;
+  ghostty_input_key_e logical_key;
 } ghostty_input_key_s;
 
 typedef enum {
@@ -510,9 +512,17 @@ typedef struct {
   void* GHOSTTY_NULLABLE uiview;
 } ghostty_platform_ios_s;
 
+// Linux hosts that present the frames of the OpenGL renderer.
+typedef struct {
+  // The EGL display of the host, or NULL for a surfaceless display.
+  // Only the first surface of an app sets the display.
+  void* display;
+} ghostty_platform_egl_s;
+
 typedef union {
   ghostty_platform_macos_s macos;
   ghostty_platform_ios_s ios;
+  ghostty_platform_egl_s egl;
 } ghostty_platform_u;
 
 typedef enum {

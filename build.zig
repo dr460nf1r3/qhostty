@@ -260,6 +260,7 @@ pub fn build(b: *std.Build) !void {
         // We shouldn't have this guard but we don't currently
         // build on macOS this way ironically so we need to fix that.
         if (!config.target.result.os.tag.isDarwin()) {
+            @import("src/build/QhosttyBuild.zig").installEmbedderFiles(b, &deps);
             lib_shared.installHeader(); // Only need one header
             if (config.target.result.os.tag == .windows) {
                 lib_shared.install("ghostty-internal.dll");
