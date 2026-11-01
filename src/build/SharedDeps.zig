@@ -661,6 +661,8 @@ pub fn add(
         }
     }
 
+    @import("QhosttyBuild.zig").addEmbeddedOpenGL(self.config, step);
+
     // If we're building an exe then we have additional dependencies.
     if (step.kind != .lib) {
         // We always statically compile glad
