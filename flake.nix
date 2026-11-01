@@ -136,6 +136,12 @@
 
             ghostty = ghostty-releasefast;
             default = ghostty;
+
+            qhostty-debug = pkgs.callPackage ./nix/qhostty.nix {optimize = "debug";};
+            qhostty-releasesafe = pkgs.callPackage ./nix/qhostty.nix {optimize = "safe";};
+            qhostty-releasefast = pkgs.callPackage ./nix/qhostty.nix {optimize = "fast";};
+
+            qhostty = qhostty-releasefast;
           })
         )
       ];
@@ -182,6 +188,9 @@
       };
       debug = final: prev: {
         ghostty = final.callPackage ./nix/package.nix (mkPkgArgs "debug");
+      };
+      qhostty = final: prev: {
+        qhostty = final.callPackage ./nix/qhostty.nix {};
       };
     };
   };
