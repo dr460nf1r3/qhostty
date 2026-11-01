@@ -1,0 +1,568 @@
+#include "CommandPalette.h"
+#include "DropText.h"
+#include "GhosttyApp.h"
+#include "GlobalShortcuts.h"
+#include "InputCoordinates.h"
+#include "InspectorWindow.h"
+#include "MainWindow.h"
+#include "QuickTerminal.h"
+#include "TerminalTab.h"
+#include "TerminalWidget.h"
+
+#include <QAction>
+#include <QApplication>
+#include <QLabel>
+#include <QMenu>
+#include <QMimeData>
+#include <QUrl>
+#include <QDir>
+#include <QPointer>
+#include <QProgressBar>
+#include <QScrollBar>
+#include <QSplitter>
+#include <QStackedWidget>
+#include <QTabBar>
+#include <QTemporaryFile>
+#include <QtTest>
+
+#include <cmath>
+#include <cstdlib>
+#include <cstring>
+#include <optional>
+
+namespace {
+struct EnumeratedBinding {
+  int count = 0;
+  ghostty_input_trigger_s trigger{};
+  QString action;
+};
+
+bool captureGlobalBinding(void* userdata,
+                          ghostty_input_trigger_s trigger,
+                          const char* action,
+                          uintptr_t actionLength) {
+  auto* result = static_cast<EnumeratedBinding*>(userdata);
+  ++result->count;
+  result->trigger = trigger;
+  result->action =
+      QString::fromUtf8(action, static_cast<qsizetype>(actionLength));
+  return true;
+}
+
+QStringList bindingActions(const QMenu* menu) {
+  QStringList result;
+  for (const QAction* action : menu->actions()) {
+    if (action->data().isValid()) {
+      result.append(action->data().toString());
+    }
+    if (action->menu() != nullptr) {
+      result.append(bindingActions(action->menu()));
+    }
+  }
+  return result;
+}
+
+ghostty_config_t configFromText(const QByteArray& contents) {
+  QTemporaryFile file;
+  if (!file.open() || file.write(contents) != contents.size() ||
+      !file.flush()) {
+    return nullptr;
+  }
+
+  ghostty_config_t config = ghostty_config_new();
+  if (config == nullptr) {
+    return nullptr;
+  }
+  const QByteArray path = file.fileName().toUtf8();
+  ghostty_config_load_file(config, path.constData());
+  ghostty_config_finalize(config);
+  return config;
+}
+}  // namespace
+
+class WindowActionsTest final : public QObject {
+  Q_OBJECT
+
+ private slots:
+  void routesTabAndSplitActions();
+  void routesTerminalStateActions();
+  void calculatesQuickTerminalGeometry();
+  void enumeratesGlobalBindings();
+  void mapsMouseCoordinates();
+  void keepsTabAsTerminalInput();
+  void controlsTabBarVisibility();
+  void routesWindowActions();
+  void splitsSpaceEvenly();
+  void buildsDropText();
+  void opensForwardedTabsAndWindows();
+  void insertsNewTabs();
+};
+
+void WindowActionsTest::insertsNewTabs() {
+  GhosttyApp ghostty;
+  QVERIFY(ghostty.initialize());
+  MainWindow window(&ghostty);
+  auto* stack = window.findChild<QStackedWidget*>();
+  window.addTab();
+  window.addTab();
+  QCOMPARE(stack->count(), 3);
+
+  // The default "current" puts a new tab after the selected tab.
+  auto* tabBar = window.findChild<QTabBar*>(QStringLiteral("qhostty-tabs"));
+  tabBar->setCurrentIndex(0);
+  const int current = window.addTab();
+  QCOMPARE(current, 1);
+  QCOMPARE(tabBar->currentIndex(), 1);
+  QCOMPARE(stack->currentIndex(), 1);
+
+  ghostty_config_t config = configFromText("window-new-tab-position = end\n");
+  QVERIFY(config != nullptr);
+  window.applyConfig(config);
+  ghostty_config_free(config);
+  tabBar->setCurrentIndex(0);
+  QCOMPARE(window.addTab(), 4);
+}
+
+void WindowActionsTest::buildsDropText() {
+  QCOMPARE(ghosttyShellEscape(QStringLiteral("a b'$(c)")),
+           QStringLiteral("a\\ b\\'\\$\\(c\\)"));
+
+  QMimeData files;
+  files.setUrls({QUrl::fromLocalFile(QStringLiteral("/tmp/my file")),
+                 QUrl::fromLocalFile(QStringLiteral("/tmp/b"))});
+  QCOMPARE(ghosttyDropText(files), QStringLiteral("/tmp/my\\ file /tmp/b"));
+
+  QMimeData text;
+  text.setText(QStringLiteral("echo hi"));
+  QCOMPARE(ghosttyDropText(text), QStringLiteral("echo hi"));
+}
+
+void WindowActionsTest::opensForwardedTabsAndWindows() {
+  GhosttyApp ghostty;
+  QVERIFY(ghostty.initialize());
+  const QString directory = QDir::currentPath();
+
+  MainWindow* first = ghostty.activate(
+      {QStringLiteral("qhostty"), QStringLiteral("+new-window")}, directory);
+  QVERIFY(first != nullptr);
+  auto* tabBar = first->findChild<QTabBar*>(QStringLiteral("qhostty-tabs"));
+  QCOMPARE(tabBar->count(), 1);
+
+  MainWindow* tabbed = ghostty.activate(
+      {QStringLiteral("qhostty"), QStringLiteral("+new-tab"),
+       QStringLiteral("--title=Logs")},
+      directory);
+  QCOMPARE(tabbed, first);
+  QCOMPARE(tabBar->count(), 2);
+  QCOMPARE(first->currentTab()->title(), QStringLiteral("Logs"));
+
+  MainWindow* second = ghostty.activate(
+      {QStringLiteral("qhostty"), QStringLiteral("+new-window")}, directory);
+  QVERIFY(second != first);
+  delete second;
+  delete first;
+}
+
+void WindowActionsTest::splitsSpaceEvenly() {
+  GhosttyApp ghostty;
+  QVERIFY(ghostty.initialize());
+  MainWindow window(&ghostty);
+  window.resize(1001, 600);
+  window.show();
+  TerminalTab* tab = window.currentTab();
+  TerminalWidget* source = tab->activeTerminal();
+  QTRY_VERIFY(source->width() > 900);
+  const int total = source->width();
+
+  TerminalWidget* second =
+      tab->newSplit(source, GHOSTTY_SPLIT_DIRECTION_RIGHT);
+  QVERIFY(second != nullptr);
+  auto* splitter = qobject_cast<QSplitter*>(source->parentWidget());
+  QVERIFY(splitter != nullptr);
+  QTRY_VERIFY(std::abs(source->width() - second->width()) <= 2);
+  QTRY_VERIFY(source->width() + second->width() >= total - 2);
+
+  const int half = second->width();
+  TerminalWidget* third = tab->newSplit(second, GHOSTTY_SPLIT_DIRECTION_LEFT);
+  QVERIFY(third != nullptr);
+  QCOMPARE(third->parentWidget(), splitter);
+  QTRY_VERIFY(std::abs(second->width() - third->width()) <= 2);
+  QVERIFY(std::abs(source->width() - half) <= 2);
+}
+
+void WindowActionsTest::routesWindowActions() {
+  GhosttyApp ghostty;
+  QVERIFY(ghostty.initialize());
+  MainWindow window(&ghostty);
+  TerminalWidget* source = window.currentTab()->activeTerminal();
+  QVERIFY(source != nullptr);
+  const QString tabTitle = window.windowTitle();
+
+  ghostty_action_s action{};
+  action.tag = GHOSTTY_ACTION_SET_WINDOW_TITLE;
+  action.action.set_title.title = "Build";
+  QVERIFY(window.handleAction(source, action).value_or(false));
+  QCOMPARE(window.windowTitle(), QStringLiteral("Build"));
+  action.action.set_title.title = "";
+  QVERIFY(window.handleAction(source, action).value_or(false));
+  QCOMPARE(window.windowTitle(), tabTitle);
+
+  action = {};
+  action.tag = GHOSTTY_ACTION_RESIZE_WINDOW;
+  action.action.resize_window = {0, 0};
+  QVERIFY(window.handleAction(source, action).value_or(false));
+
+  window.addTab();
+  auto* tabBar = window.findChild<QTabBar*>(QStringLiteral("qhostty-tabs"));
+  QVERIFY(tabBar != nullptr);
+  QCOMPARE(tabBar->count(), 2);
+  action = {};
+  action.tag = GHOSTTY_ACTION_MOVE_TAB_TO_NEW_WINDOW;
+  QVERIFY(window.handleAction(window.currentTab()->activeTerminal(), action)
+              .value_or(false));
+  QCOMPARE(tabBar->count(), 1);
+  QList<QPointer<MainWindow>> detached;
+  for (QWidget* widget : QApplication::topLevelWidgets()) {
+    auto* other = qobject_cast<MainWindow*>(widget);
+    if (other != nullptr && other != &window) {
+      detached.append(other);
+    }
+  }
+  QCOMPARE(detached.size(), 1);
+  qDeleteAll(detached);
+}
+
+void WindowActionsTest::controlsTabBarVisibility() {
+  GhosttyApp ghostty;
+  QVERIFY(ghostty.initialize());
+  MainWindow window(&ghostty);
+  auto* tabBar = window.findChild<QTabBar*>(QStringLiteral("qhostty-tabs"));
+  QVERIFY(tabBar != nullptr);
+
+  ghostty_config_t config = configFromText("window-show-tab-bar = auto\n");
+  QVERIFY(config != nullptr);
+  window.applyConfig(config);
+  ghostty_config_free(config);
+  QVERIFY(tabBar->isHidden());
+
+  window.addTab();
+  QVERIFY(!tabBar->isHidden());
+
+  ghostty_action_s action{};
+  action.tag = GHOSTTY_ACTION_CLOSE_TAB;
+  QVERIFY(window.handleAction(window.currentTab()->activeTerminal(), action)
+              .value_or(false));
+  QCOMPARE(tabBar->count(), 1);
+  QVERIFY(tabBar->isHidden());
+
+  config = configFromText("window-show-tab-bar = always\n");
+  QVERIFY(config != nullptr);
+  action = {};
+  action.tag = GHOSTTY_ACTION_CONFIG_CHANGE;
+  action.action.config_change.config = config;
+  QVERIFY(window.currentTab()->activeTerminal()->handleAction(action).value_or(
+      false));
+  ghostty_config_free(config);
+  QVERIFY(!tabBar->isHidden());
+
+  window.addTab();
+  QCOMPARE(tabBar->count(), 2);
+  config = configFromText("window-show-tab-bar = never\n");
+  QVERIFY(config != nullptr);
+  action.action.config_change.config = config;
+  QVERIFY(window.currentTab()->activeTerminal()->handleAction(action).value_or(
+      false));
+  ghostty_config_free(config);
+  QVERIFY(tabBar->isHidden());
+}
+
+void WindowActionsTest::keepsTabAsTerminalInput() {
+  GhosttyApp ghostty;
+  QVERIFY(ghostty.initialize());
+  MainWindow window(&ghostty);
+  window.show();
+  TerminalWidget* terminal = window.currentTab()->activeTerminal();
+  QVERIFY(terminal != nullptr);
+  terminal->setFocus();
+  QTRY_VERIFY(terminal->hasFocus());
+  QTest::keyClick(terminal, Qt::Key_Tab);
+  QCOMPARE(QApplication::focusWidget(), terminal);
+}
+
+void WindowActionsTest::mapsMouseCoordinates() {
+  const QPointF logicalPosition(37.25, 81.5);
+  QCOMPARE(ghosttySurfaceMousePosition(logicalPosition, 1.0), logicalPosition);
+  QCOMPARE(ghosttySurfaceMousePosition(logicalPosition, 1.5), logicalPosition);
+  QCOMPARE(ghosttySurfaceMousePosition(logicalPosition, 2.0), logicalPosition);
+}
+
+void WindowActionsTest::enumeratesGlobalBindings() {
+  QTemporaryFile file;
+  QVERIFY(file.open());
+  QCOMPARE(file.write("keybind = global:ctrl+shift+g=toggle_quick_terminal\n"),
+           52);
+  QVERIFY(file.flush());
+
+  ghostty_config_t config = ghostty_config_new();
+  QVERIFY(config != nullptr);
+  const QByteArray path = file.fileName().toUtf8();
+  ghostty_config_load_file(config, path.constData());
+  ghostty_config_finalize(config);
+
+  EnumeratedBinding binding;
+  ghostty_config_enumerate_global_keybinds(config, &binding,
+                                           &captureGlobalBinding);
+  QCOMPARE(binding.count, 1);
+  QCOMPARE(binding.action, QStringLiteral("toggle_quick_terminal"));
+  QCOMPARE(binding.trigger.tag, GHOSTTY_TRIGGER_UNICODE);
+  QCOMPARE(binding.trigger.key.unicode, static_cast<uint32_t>('g'));
+  QVERIFY(binding.trigger.mods & GHOSTTY_MODS_CTRL);
+  QVERIFY(binding.trigger.mods & GHOSTTY_MODS_SHIFT);
+  QCOMPARE(GlobalShortcuts::sequenceForTrigger(binding.trigger),
+           QKeySequence(QKeyCombination(Qt::ControlModifier | Qt::ShiftModifier,
+                                        Qt::Key_G)));
+  ghostty_config_free(config);
+}
+
+void WindowActionsTest::calculatesQuickTerminalGeometry() {
+  QuickTerminalSettings settings;
+  const QRect landscape(100, 50, 1920, 1080);
+  QCOMPARE(settings.geometry(landscape), QRect(100, 50, 1920, 400));
+
+  settings.position = QuickTerminalSettings::Position::Left;
+  QCOMPARE(settings.geometry(landscape), QRect(100, 50, 400, 1080));
+
+  settings.position = QuickTerminalSettings::Position::Top;
+  settings.size.primary.tag = GHOSTTY_QUICK_TERMINAL_SIZE_PERCENTAGE;
+  settings.size.primary.value.percentage = 50;
+  settings.size.secondary.tag = GHOSTTY_QUICK_TERMINAL_SIZE_PIXELS;
+  settings.size.secondary.value.pixels = 800;
+  QCOMPARE(settings.geometry(landscape), QRect(660, 50, 800, 540));
+
+  settings = {};
+  settings.position = QuickTerminalSettings::Position::Center;
+  QCOMPARE(settings.geometry(QRect(0, 0, 1080, 1920)),
+           QRect(340, 560, 400, 800));
+}
+
+void WindowActionsTest::routesTerminalStateActions() {
+  GhosttyApp ghostty;
+  QVERIFY(ghostty.initialize());
+  MainWindow window(&ghostty);
+  TerminalWidget* terminal = window.currentTab()->activeTerminal();
+  QVERIFY(terminal != nullptr);
+
+  ghostty_action_s action{};
+  ghostty_config_t previousConfig = terminal->config();
+  action.tag = GHOSTTY_ACTION_CONFIG_CHANGE;
+  action.action.config_change.config = ghostty.config();
+  QVERIFY(terminal->handleAction(action).value_or(false));
+  QVERIFY(terminal->config() != nullptr);
+  QVERIFY(terminal->config() != previousConfig);
+
+  action = {};
+  action.tag = GHOSTTY_ACTION_READONLY;
+  action.action.readonly = GHOSTTY_READONLY_ON;
+  QVERIFY(terminal->handleAction(action).value_or(false));
+  auto* readonly =
+      terminal->findChild<QLabel*>(QStringLiteral("qhostty-readonly"));
+  QVERIFY(readonly != nullptr);
+  QVERIFY(!readonly->isHidden());
+
+  action = {};
+  action.tag = GHOSTTY_ACTION_SCROLLBAR;
+  action.action.scrollbar = {100, 20, 10};
+  QVERIFY(terminal->handleAction(action).value_or(false));
+  auto* scrollbar =
+      terminal->findChild<QScrollBar*>(QStringLiteral("qhostty-scrollbar"));
+  QVERIFY(scrollbar != nullptr);
+  QVERIFY(!scrollbar->isHidden());
+  QCOMPARE(scrollbar->value(), 20);
+
+  action = {};
+  action.tag = GHOSTTY_ACTION_KEY_SEQUENCE;
+  action.action.key_sequence.active = true;
+  action.action.key_sequence.trigger.tag = GHOSTTY_TRIGGER_UNICODE;
+  action.action.key_sequence.trigger.key.unicode = 'g';
+  action.action.key_sequence.trigger.mods = GHOSTTY_MODS_CTRL;
+  QVERIFY(terminal->handleAction(action).value_or(false));
+  auto* keyState =
+      terminal->findChild<QLabel*>(QStringLiteral("qhostty-key-state"));
+  QVERIFY(keyState != nullptr);
+  QVERIFY(!keyState->isHidden());
+  QVERIFY(keyState->text().contains(QStringLiteral("Ctrl+g")));
+
+  action = {};
+  action.tag = GHOSTTY_ACTION_PROGRESS_REPORT;
+  action.action.progress_report.state = GHOSTTY_PROGRESS_STATE_SET;
+  action.action.progress_report.progress = 42;
+  QVERIFY(terminal->handleAction(action).value_or(false));
+  auto* progress =
+      terminal->findChild<QProgressBar*>(QStringLiteral("qhostty-progress"));
+  QVERIFY(progress != nullptr);
+  bool progressEnabled = true;
+  ghostty_config_get(ghostty.config(), &progressEnabled, "progress-style",
+                     std::strlen("progress-style"));
+  QCOMPARE(!progress->isHidden(), progressEnabled);
+  if (progressEnabled) {
+    QCOMPARE(progress->value(), 42);
+  }
+
+  action = {};
+  action.tag = GHOSTTY_ACTION_INSPECTOR;
+  action.action.inspector = GHOSTTY_INSPECTOR_SHOW;
+  QVERIFY(terminal->handleAction(action).value_or(false));
+  auto* inspector = window.findChild<InspectorWindow*>();
+  QVERIFY(inspector != nullptr);
+  action.action.inspector = GHOSTTY_INSPECTOR_HIDE;
+  QVERIFY(terminal->handleAction(action).value_or(false));
+  QVERIFY(inspector->isHidden());
+
+  auto* contextMenu = terminal->findChild<QMenu*>(
+      QStringLiteral("qhostty-context-menu"), Qt::FindDirectChildrenOnly);
+  QVERIFY(contextMenu != nullptr);
+  QCOMPARE(
+      bindingActions(contextMenu),
+      QStringList(
+          {QStringLiteral("copy_to_clipboard"),
+           QStringLiteral("paste_from_clipboard"),
+           QStringLiteral("clear_screen"), QStringLiteral("reset"),
+           QStringLiteral("prompt_surface_title"),
+           QStringLiteral("new_split:up"), QStringLiteral("new_split:down"),
+           QStringLiteral("new_split:left"), QStringLiteral("new_split:right"),
+           QStringLiteral("close_surface"), QStringLiteral("prompt_tab_title"),
+           QStringLiteral("new_tab"), QStringLiteral("close_tab"),
+           QStringLiteral("new_window"), QStringLiteral("close_window"),
+           QStringLiteral("open_config"), QStringLiteral("reload_config")}));
+  auto* notifyNext = terminal->findChild<QAction*>(
+      QStringLiteral("qhostty-notify-next-command"));
+  QVERIFY(notifyNext != nullptr);
+  QVERIFY(notifyNext->isCheckable());
+  notifyNext->setChecked(true);
+  action = {};
+  action.tag = GHOSTTY_ACTION_COMMAND_FINISHED;
+  action.action.command_finished = {-1, 0};
+  QVERIFY(terminal->handleAction(action).value_or(false));
+  QVERIFY(!notifyNext->isChecked());
+
+  action = {};
+  action.tag = GHOSTTY_ACTION_MOUSE_SHAPE;
+  action.action.mouse_shape = GHOSTTY_MOUSE_SHAPE_TEXT;
+  QVERIFY(terminal->handleAction(action).value_or(false));
+  QCOMPARE(terminal->cursor().shape(), Qt::IBeamCursor);
+
+  action = {};
+  action.tag = GHOSTTY_ACTION_MOUSE_VISIBILITY;
+  action.action.mouse_visibility = GHOSTTY_MOUSE_HIDDEN;
+  QVERIFY(terminal->handleAction(action).value_or(false));
+  QCOMPARE(terminal->cursor().shape(), Qt::BlankCursor);
+
+  action = {};
+  action.tag = GHOSTTY_ACTION_MOUSE_SHAPE;
+  action.action.mouse_shape = GHOSTTY_MOUSE_SHAPE_POINTER;
+  QVERIFY(terminal->handleAction(action).value_or(false));
+  QCOMPARE(terminal->cursor().shape(), Qt::BlankCursor);
+
+  action = {};
+  action.tag = GHOSTTY_ACTION_MOUSE_VISIBILITY;
+  action.action.mouse_visibility = GHOSTTY_MOUSE_VISIBLE;
+  QVERIFY(terminal->handleAction(action).value_or(false));
+  QCOMPARE(terminal->cursor().shape(), Qt::PointingHandCursor);
+
+  action = {};
+  action.tag = GHOSTTY_ACTION_GOTO_TAB;
+  QVERIFY(!terminal->handleAction(action).has_value());
+}
+
+void WindowActionsTest::routesTabAndSplitActions() {
+  GhosttyApp ghostty;
+  QVERIFY(ghostty.initialize());
+
+  MainWindow window(&ghostty);
+  auto* tabBar = window.findChild<QTabBar*>(QStringLiteral("qhostty-tabs"));
+  auto* stack = window.findChild<QStackedWidget*>();
+  QVERIFY(tabBar != nullptr);
+  QVERIFY(stack != nullptr);
+  QCOMPARE(tabBar->count(), 1);
+
+  TerminalTab* firstTab = window.currentTab();
+  QVERIFY(firstTab != nullptr);
+  TerminalWidget* source = firstTab->activeTerminal();
+  QVERIFY(source != nullptr);
+
+  CommandPalette palette(source->config(), source, {source});
+  QVERIFY(palette.entryCount() >= 1);
+
+  ghostty_action_s action{};
+  action.tag = GHOSTTY_ACTION_FLOAT_WINDOW;
+  action.action.float_window = GHOSTTY_FLOAT_WINDOW_ON;
+  QVERIFY(window.handleAction(source, action).value_or(false));
+  QVERIFY(window.isHidden());
+
+  action = {};
+  action.tag = GHOSTTY_ACTION_NEW_TAB;
+  QVERIFY(window.handleAction(source, action).value_or(false));
+  QCOMPARE(tabBar->count(), 2);
+
+  action = {};
+  action.tag = GHOSTTY_ACTION_GOTO_TAB;
+  action.action.goto_tab = static_cast<ghostty_action_goto_tab_e>(1);
+  QVERIFY(window.handleAction(source, action).value_or(false));
+  QCOMPARE(tabBar->currentIndex(), 0);
+
+  action.action.goto_tab = static_cast<ghostty_action_goto_tab_e>(9);
+  QVERIFY(window.handleAction(source, action).value_or(false));
+  QCOMPARE(tabBar->currentIndex(), 1);
+
+  const std::optional<bool> tabNoOp = window.handleAction(source, action);
+  QVERIFY(tabNoOp.has_value());
+  QVERIFY(!tabNoOp.value());
+
+  action = {};
+  action.tag = GHOSTTY_ACTION_NEW_SPLIT;
+  action.action.new_split = GHOSTTY_SPLIT_DIRECTION_RIGHT;
+  QVERIFY(window.handleAction(source, action).value_or(false));
+  QCOMPARE(firstTab->terminals().size(), 2);
+
+  action = {};
+  action.tag = GHOSTTY_ACTION_GOTO_SPLIT;
+  action.action.goto_split = GHOSTTY_GOTO_SPLIT_NEXT;
+  QVERIFY(window.handleAction(source, action).value_or(false));
+
+  action = {};
+  action.tag = GHOSTTY_ACTION_RESIZE_SPLIT;
+  action.action.resize_split = {10, GHOSTTY_RESIZE_SPLIT_RIGHT};
+  QVERIFY(window.handleAction(source, action).value_or(false));
+
+  action = {};
+  action.tag = GHOSTTY_ACTION_EQUALIZE_SPLITS;
+  QVERIFY(window.handleAction(source, action).value_or(false));
+
+  action = {};
+  action.tag = GHOSTTY_ACTION_TOGGLE_SPLIT_ZOOM;
+  QVERIFY(window.handleAction(source, action).value_or(false));
+  QVERIFY(window.handleAction(source, action).value_or(false));
+
+  action = {};
+  action.tag = GHOSTTY_ACTION_MOVE_TAB;
+  action.action.move_tab.amount = 1;
+  QVERIFY(window.handleAction(source, action).value_or(false));
+  QCOMPARE(stack->indexOf(firstTab), 1);
+  QCOMPARE(tabBar->count(), 2);
+
+  action = {};
+  action.tag = GHOSTTY_ACTION_RENDER;
+  QVERIFY(!window.handleAction(source, action).has_value());
+}
+
+int main(int argc, char** argv) {
+  if (ghostty_init(static_cast<uintptr_t>(argc), argv) != 0) {
+    return EXIT_FAILURE;
+  }
+  QCoreApplication::setAttribute(Qt::AA_ShareOpenGLContexts);
+  QApplication application(argc, argv);
+  WindowActionsTest test;
+  return QTest::qExec(&test, argc, argv);
+}
+
+#include "tst_WindowActions.moc"

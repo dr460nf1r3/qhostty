@@ -1,0 +1,876 @@
+#include "GhosttyApp.h"
+
+#include "CgroupScope.h"
+#include "GlobalShortcuts.h"
+#include "MainWindow.h"
+#include "QuickTerminal.h"
+#include "TerminalTab.h"
+#include "TerminalWidget.h"
+
+#include <QApplication>
+#include <QMessageBox>
+#include <QPushButton>
+#ifdef QHOSTTY_HAS_MULTIMEDIA
+#include <QAudioOutput>
+#include <QMediaPlayer>
+#endif
+#include <QClipboard>
+#include <QCoreApplication>
+#include <QDBusConnection>
+#include <QDBusMessage>
+#include <QDBusPendingCall>
+#include <QDebug>
+#include <QDesktopServices>
+#include <QDir>
+#include <QInputMethod>
+#include <QMetaObject>
+#include <QPalette>
+#include <QStyleHints>
+#include <QTemporaryFile>
+#include <QTimer>
+#include <QUrl>
+
+#include <algorithm>
+#include <limits>
+#include <optional>
+
+namespace {
+ghostty_config_t loadConfig(const QByteArray& overridePath = {}) {
+  ghostty_config_t config = ghostty_config_new();
+  if (config == nullptr) {
+    return nullptr;
+  }
+
+  ghostty_config_load_default_files(config);
+  ghostty_config_load_cli_args(config);
+  ghostty_config_load_recursive_files(config);
+  if (!overridePath.isEmpty()) {
+    ghostty_config_load_file(config, overridePath.constData());
+  }
+  ghostty_config_finalize(config);
+  return config;
+}
+
+// The configuration with an opaque background, for toggle_background_opacity.
+ghostty_config_t loadOpaqueConfig() {
+  static QTemporaryFile* file = []() {
+    auto* result = new QTemporaryFile(qApp);
+    if (result->open()) {
+      result->write("background-opacity = 1\n");
+      result->flush();
+    }
+    return result;
+  }();
+  return file->fileName().isEmpty() ? nullptr
+                                    : loadConfig(file->fileName().toUtf8());
+}
+
+void logDiagnostics(ghostty_config_t config) {
+  const uint32_t count = ghostty_config_diagnostics_count(config);
+  for (uint32_t index = 0; index < count; ++index) {
+    const ghostty_diagnostic_s diagnostic =
+        ghostty_config_get_diagnostic(config, index);
+    qWarning().noquote() << "Ghostty config:" << diagnostic.message;
+  }
+}
+
+struct ActivationOptions {
+  QString workingDirectory;
+  QString command;
+  QString initialInput;
+  QString title;
+  float fontSize = 0;
+  bool waitAfterCommand = false;
+  bool newTab = false;
+};
+
+QString shellQuote(QString value) {
+  value.replace(QLatin1Char('\''), QStringLiteral("'\\''"));
+  return QLatin1Char('\'') + value + QLatin1Char('\'');
+}
+
+ActivationOptions parseActivation(const QStringList& arguments,
+                                  const QString& senderDirectory) {
+  ActivationOptions result;
+  result.workingDirectory = QDir(senderDirectory).absolutePath();
+  QStringList commandArguments;
+
+  qsizetype first = 1;
+  if (arguments.size() > 1 &&
+      (arguments.at(1) == QStringLiteral("+new-tab") ||
+       arguments.at(1) == QStringLiteral("+new-window"))) {
+    result.newTab = arguments.at(1) == QStringLiteral("+new-tab");
+    first = 2;
+  }
+
+  for (qsizetype index = first; index < arguments.size(); ++index) {
+    const QString& argument = arguments.at(index);
+    if (argument == QStringLiteral("-e") || argument == QStringLiteral("--")) {
+      commandArguments = arguments.mid(index + 1);
+      break;
+    }
+
+    auto takeValue = [&](const QString& name) -> QString {
+      const QString prefix = name + QLatin1Char('=');
+      if (argument.startsWith(prefix)) {
+        return argument.mid(prefix.size());
+      }
+      if (argument == name && index + 1 < arguments.size()) {
+        return arguments.at(++index);
+      }
+      return {};
+    };
+
+    if (const QString value = takeValue(QStringLiteral("--working-directory"));
+        !value.isEmpty()) {
+      if (value == QStringLiteral("home")) {
+        result.workingDirectory = QDir::homePath();
+      } else if (value == QStringLiteral("inherit")) {
+        result.workingDirectory = QDir(senderDirectory).absolutePath();
+      } else {
+        result.workingDirectory = QDir(senderDirectory).absoluteFilePath(value);
+      }
+    } else if (const QString value = takeValue(QStringLiteral("--title"));
+               !value.isEmpty()) {
+      result.title = value;
+    } else if (const QString value = takeValue(QStringLiteral("--font-size"));
+               !value.isEmpty()) {
+      bool valid = false;
+      const float fontSize = value.toFloat(&valid);
+      if (valid && fontSize > 0) {
+        result.fontSize = fontSize;
+      }
+    } else if (const QString value = takeValue(QStringLiteral("--command"));
+               !value.isEmpty()) {
+      result.command = value;
+    } else if (const QString value =
+                   takeValue(QStringLiteral("--initial-input"));
+               !value.isEmpty()) {
+      result.initialInput = value;
+    } else if (argument == QStringLiteral("--wait-after-command")) {
+      result.waitAfterCommand = true;
+    }
+  }
+
+  if (!commandArguments.isEmpty()) {
+    QStringList quoted;
+    quoted.reserve(commandArguments.size());
+    for (const QString& argument : commandArguments) {
+      quoted.append(shellQuote(argument));
+    }
+    result.command = quoted.join(QLatin1Char(' '));
+    result.waitAfterCommand = true;
+  }
+  return result;
+}
+}  // namespace
+
+GhosttyApp::GhosttyApp(QObject* parent)
+    : QObject(parent), m_quitTimer(new QTimer(this)) {
+  m_quitTimer->setSingleShot(true);
+  connect(m_quitTimer, &QTimer::timeout, this, [this]() {
+    if (m_quitDelayRemainingNs > m_quitTimerChunkNs) {
+      m_quitDelayRemainingNs -= m_quitTimerChunkNs;
+      scheduleQuitTimer();
+      return;
+    }
+    m_quitDelayRemainingNs = 0;
+    QCoreApplication::quit();
+  });
+  if (qApp != nullptr) {
+    qApp->setQuitOnLastWindowClosed(false);
+  }
+}
+
+GhosttyApp::~GhosttyApp() {
+  while (!m_windows.isEmpty()) {
+    delete *m_windows.begin();
+  }
+  if (!m_surfaces.isEmpty()) {
+    qWarning() << "Destroying GhosttyApp with" << m_surfaces.size()
+               << "live surfaces";
+  }
+
+  if (m_app != nullptr) {
+    ghostty_app_free(m_app);
+    m_app = nullptr;
+  }
+  if (m_config != nullptr) {
+    ghostty_config_free(m_config);
+    m_config = nullptr;
+  }
+  if (m_opaqueConfig != nullptr) {
+    ghostty_config_free(m_opaqueConfig);
+    m_opaqueConfig = nullptr;
+  }
+}
+
+bool GhosttyApp::initialize() {
+  m_config = loadConfig();
+  if (m_config == nullptr) {
+    qCritical() << "Failed to create Ghostty configuration";
+    return false;
+  }
+  logDiagnostics(m_config);
+  showConfigErrors(m_config);
+
+  ghostty_runtime_config_s runtime{};
+  runtime.userdata = this;
+  runtime.supports_selection_clipboard =
+      QGuiApplication::clipboard()->supportsSelection();
+  runtime.wakeup_cb = &GhosttyApp::wakeupCallback;
+  runtime.action_cb = &GhosttyApp::actionCallback;
+  runtime.read_clipboard_cb = &GhosttyApp::readClipboardCallback;
+  runtime.confirm_read_clipboard_cb = &GhosttyApp::confirmReadClipboardCallback;
+  runtime.write_clipboard_cb = &GhosttyApp::writeClipboardCallback;
+  runtime.close_surface_cb = &GhosttyApp::closeSurfaceCallback;
+
+  m_app = ghostty_app_new(&runtime, m_config);
+  if (m_app == nullptr) {
+    qCritical() << "Failed to create Ghostty application";
+    return false;
+  }
+  installCgroupScopeCallback(m_app);
+
+  m_globalShortcuts = new GlobalShortcuts(this, this);
+  m_globalShortcuts->refresh(m_config);
+
+  connect(qGuiApp, &QGuiApplication::applicationStateChanged, this,
+          [this](Qt::ApplicationState state) {
+            if (m_app != nullptr) {
+              ghostty_app_set_focus(m_app, state == Qt::ApplicationActive);
+            }
+          });
+  connect(QGuiApplication::styleHints(), &QStyleHints::colorSchemeChanged, this,
+          [this](Qt::ColorScheme) { syncColorScheme(); });
+  connect(QGuiApplication::inputMethod(), &QInputMethod::localeChanged, this,
+          [this]() {
+            if (m_app != nullptr) {
+              ghostty_app_keyboard_changed(m_app);
+            }
+          });
+
+  ghostty_app_set_focus(m_app,
+                        qGuiApp->applicationState() == Qt::ApplicationActive);
+  applyWindowTheme();
+  syncColorScheme();
+  return true;
+}
+
+bool GhosttyApp::reloadConfig(bool soft) {
+  if (m_app == nullptr || m_config == nullptr) {
+    return false;
+  }
+
+  if (soft) {
+    ghostty_app_update_config(m_app, m_config);
+    return true;
+  }
+
+  ghostty_config_t replacement = loadConfig();
+  if (replacement == nullptr) {
+    return false;
+  }
+  logDiagnostics(replacement);
+  showConfigErrors(replacement);
+  showReloadNotification(replacement);
+
+  ghostty_app_update_config(m_app, replacement);
+  ghostty_config_free(replacement);
+  if (m_backgroundOpaque) {
+    syncBackgroundOpacity();
+  }
+  return true;
+}
+
+bool GhosttyApp::reloadConfig(TerminalWidget* widget, bool soft) {
+  if (widget == nullptr || widget->surface() == nullptr ||
+      m_config == nullptr) {
+    return false;
+  }
+
+  if (soft) {
+    ghostty_surface_update_config(widget->surface(), m_config);
+    return true;
+  }
+
+  ghostty_config_t replacement = loadConfig();
+  if (replacement == nullptr) {
+    return false;
+  }
+  logDiagnostics(replacement);
+  showConfigErrors(replacement);
+  showReloadNotification(replacement);
+  ghostty_surface_update_config(widget->surface(), replacement);
+  ghostty_config_free(replacement);
+  if (m_backgroundOpaque) {
+    syncBackgroundOpacity();
+  }
+  return true;
+}
+
+bool GhosttyApp::toggleBackgroundOpacity() {
+  double opacity = 1;
+  ghostty_config_get(m_config, &opacity, "background-opacity",
+                     std::strlen("background-opacity"));
+  if (opacity >= 1 && !m_backgroundOpaque) {
+    return false;
+  }
+
+  m_backgroundOpaque = !m_backgroundOpaque;
+  syncBackgroundOpacity();
+  return true;
+}
+
+void GhosttyApp::syncBackgroundOpacity() {
+  if (m_opaqueConfig != nullptr) {
+    ghostty_config_free(m_opaqueConfig);
+    m_opaqueConfig = nullptr;
+  }
+  if (m_backgroundOpaque) {
+    m_opaqueConfig = loadOpaqueConfig();
+  }
+
+  for (TerminalWidget* widget : m_surfaces) {
+    if (widget != nullptr && widget->surface() != nullptr) {
+      ghostty_surface_update_config(
+          widget->surface(),
+          m_opaqueConfig != nullptr ? m_opaqueConfig : m_config);
+    }
+  }
+}
+
+void GhosttyApp::applyBackgroundOpacity(TerminalWidget* widget) {
+  if (m_opaqueConfig != nullptr && widget->surface() != nullptr) {
+    ghostty_surface_update_config(widget->surface(), m_opaqueConfig);
+  }
+}
+
+void GhosttyApp::showConfigErrors(ghostty_config_t config) {
+  const uint32_t count = ghostty_config_diagnostics_count(config);
+  if (count == 0) {
+    if (m_configErrors != nullptr) {
+      m_configErrors->close();
+    }
+    return;
+  }
+
+  QStringList messages;
+  for (uint32_t index = 0; index < count; ++index) {
+    messages.append(QString::fromUtf8(
+        ghostty_config_get_diagnostic(config, index).message));
+  }
+
+  // Show the dialog after the windows that open now, so it stays on top.
+  QTimer::singleShot(0, this, [this, messages]() {
+    showConfigErrorDialog(messages);
+  });
+}
+
+void GhosttyApp::showConfigErrorDialog(const QStringList& messages) {
+  if (m_configErrors == nullptr) {
+    m_configErrors = new QMessageBox(QMessageBox::Warning,
+                                     tr("Configuration Errors"), QString());
+    m_configErrors->setAttribute(Qt::WA_DeleteOnClose, true);
+    m_configErrors->setWindowModality(Qt::NonModal);
+    m_configErrors->addButton(tr("Ignore"), QMessageBox::RejectRole);
+    QPushButton* reload = m_configErrors->addButton(
+        tr("Reload Configuration"), QMessageBox::AcceptRole);
+    connect(reload, &QPushButton::clicked, this, [this]() { reloadConfig(); });
+  }
+  m_configErrors->setText(
+      tr("One or more configuration errors were found. Fix the errors and "
+         "reload the configuration, or ignore them."));
+  m_configErrors->setInformativeText(messages.join(QLatin1Char('\n')));
+  m_configErrors->show();
+  m_configErrors->raise();
+}
+
+void GhosttyApp::showReloadNotification(ghostty_config_t config) {
+  // app-notifications: bit 0 is clipboard-copy, bit 1 is config-reload.
+  uint32_t notifications = 0b11;
+  ghostty_config_get(config, &notifications, "app-notifications",
+                     std::strlen("app-notifications"));
+  if ((notifications & 0b10) == 0) {
+    return;
+  }
+  for (MainWindow* window : m_windows) {
+    if (window != nullptr && window->isVisible()) {
+      window->showToast(tr("Reloaded the configuration"));
+    }
+  }
+}
+
+void GhosttyApp::playSound(const QString& path, double volume) {
+#ifdef QHOSTTY_HAS_MULTIMEDIA
+  if (m_soundPlayer == nullptr) {
+    m_soundPlayer = new QMediaPlayer(this);
+    m_soundPlayer->setAudioOutput(new QAudioOutput(m_soundPlayer));
+  }
+  m_soundPlayer->audioOutput()->setVolume(static_cast<float>(volume));
+  m_soundPlayer->setSource(QUrl::fromLocalFile(path));
+  m_soundPlayer->play();
+#else
+  Q_UNUSED(path);
+  Q_UNUSED(volume);
+  qWarning("Qhostty was built without Qt Multimedia, so bell audio is off");
+#endif
+}
+
+void GhosttyApp::openConfigInWindow(const QString& path) {
+  QString editor = qEnvironmentVariable("VISUAL");
+  if (editor.isEmpty()) {
+    editor = qEnvironmentVariable("EDITOR");
+  }
+  if (editor.isEmpty()) {
+    editor = QStringLiteral("vi");
+  }
+
+  QString quoted = path;
+  quoted.replace(QLatin1Char('\''), QStringLiteral("'\\''"));
+  const QByteArray command =
+      (editor + QStringLiteral(" '") + quoted + QLatin1Char('\'')).toUtf8();
+
+  ghostty_surface_config_s config = ghostty_surface_config_new();
+  config.command = command.constData();
+  config.context = GHOSTTY_SURFACE_CONTEXT_WINDOW;
+  createWindow(&config);
+}
+
+MainWindow* GhosttyApp::createWindow(
+    const ghostty_surface_config_s* baseConfig) {
+  auto* window = new MainWindow(this, nullptr, baseConfig);
+  window->show();
+  return window;
+}
+
+void GhosttyApp::toggleQuickTerminal() {
+  if (m_quickTerminal != nullptr && m_quickTerminal->isVisible()) {
+    m_quickTerminal->hide();
+    return;
+  }
+
+  if (m_quickTerminal == nullptr) {
+    m_quickTerminal = new MainWindow(this, nullptr, nullptr, true,
+                                     MainWindow::Role::QuickTerminal);
+  }
+  showQuickTerminal(m_quickTerminal,
+                    QuickTerminalSettings::fromConfig(m_config));
+}
+
+bool GhosttyApp::performBindingAction(const QString& action) {
+  if (action == QStringLiteral("toggle_quick_terminal")) {
+    toggleQuickTerminal();
+    return true;
+  }
+
+  auto* window = qobject_cast<MainWindow*>(QApplication::activeWindow());
+  if (window == nullptr) {
+    for (MainWindow* candidate : m_windows) {
+      if (candidate != nullptr && candidate->isVisible()) {
+        window = candidate;
+        break;
+      }
+    }
+  }
+  TerminalTab* tab = window != nullptr ? window->currentTab() : nullptr;
+  TerminalWidget* terminal = tab != nullptr ? tab->activeTerminal() : nullptr;
+  return terminal != nullptr && terminal->runBindingAction(action);
+}
+
+MainWindow* GhosttyApp::activate(const QStringList& arguments,
+                                 const QString& workingDirectory) {
+  const ActivationOptions options =
+      parseActivation(arguments, workingDirectory);
+  const QByteArray directory = options.workingDirectory.toUtf8();
+  const QByteArray command = options.command.toUtf8();
+  const QByteArray input = options.initialInput.toUtf8();
+
+  ghostty_surface_config_s config = ghostty_surface_config_new();
+  config.context = GHOSTTY_SURFACE_CONTEXT_WINDOW;
+  config.working_directory =
+      directory.isEmpty() ? nullptr : directory.constData();
+  config.command = command.isEmpty() ? nullptr : command.constData();
+  config.initial_input = input.isEmpty() ? nullptr : input.constData();
+  config.font_size = options.fontSize;
+  config.wait_after_command = options.waitAfterCommand;
+
+  MainWindow* window = nullptr;
+  if (options.newTab) {
+    window = qobject_cast<MainWindow*>(QApplication::activeWindow());
+    for (qsizetype index = m_windows.size() - 1;
+         index >= 0 && (window == nullptr || window->isQuickTerminal());
+         --index) {
+      window = m_windows.at(index);
+    }
+  }
+  if (window != nullptr && !window->isQuickTerminal()) {
+    config.context = GHOSTTY_SURFACE_CONTEXT_TAB;
+    window->addTab(&config);
+    if (!options.title.isEmpty()) {
+      window->currentTab()->setTitleOverride(options.title);
+    }
+    window->show();
+  } else {
+    window = createWindow(&config);
+    if (!options.title.isEmpty()) {
+      window->setWindowTitle(options.title);
+    }
+  }
+  window->raise();
+  window->activateWindow();
+  return window;
+}
+
+void GhosttyApp::registerWindow(MainWindow* window) {
+  if (!m_windows.contains(window)) {
+    m_windows.append(window);
+  }
+}
+
+void GhosttyApp::unregisterWindow(MainWindow* window) {
+  m_windows.removeAll(window);
+}
+
+void GhosttyApp::registerSurface(TerminalWidget* widget) {
+  m_surfaces.insert(widget);
+}
+
+void GhosttyApp::unregisterSurface(TerminalWidget* widget) {
+  m_surfaces.remove(widget);
+}
+
+void GhosttyApp::wakeupCallback(void* userdata) {
+  static_cast<GhosttyApp*>(userdata)->scheduleTick();
+}
+
+bool GhosttyApp::actionCallback(ghostty_app_t app,
+                                ghostty_target_s target,
+                                ghostty_action_s action) {
+  auto* self = static_cast<GhosttyApp*>(ghostty_app_userdata(app));
+  return self != nullptr && self->handleAction(target, action);
+}
+
+ghostty_clipboard_read_result_e GhosttyApp::readClipboardCallback(
+    void* userdata,
+    ghostty_clipboard_e location,
+    void* state,
+    const char* const* mimes,
+    size_t mimeCount,
+    bool list) {
+  auto* widget = static_cast<TerminalWidget*>(userdata);
+  return widget == nullptr
+             ? GHOSTTY_CLIPBOARD_READ_UNAVAILABLE
+             : widget->readClipboard(location, state, mimes, mimeCount, list);
+}
+
+void GhosttyApp::confirmReadClipboardCallback(
+    void* userdata,
+    const ghostty_clipboard_confirm_s* confirm,
+    void* state,
+    ghostty_clipboard_request_e request) {
+  auto* widget = static_cast<TerminalWidget*>(userdata);
+  if (widget != nullptr) {
+    widget->confirmReadClipboard(confirm, state, request);
+  }
+}
+
+void GhosttyApp::writeClipboardCallback(
+    void* userdata,
+    ghostty_clipboard_e location,
+    const ghostty_clipboard_content_s* contents,
+    size_t count,
+    bool confirm) {
+  auto* widget = static_cast<TerminalWidget*>(userdata);
+  if (widget != nullptr) {
+    widget->writeClipboard(location, contents, count, confirm);
+  }
+}
+
+void GhosttyApp::closeSurfaceCallback(void* userdata, bool processAlive) {
+  auto* widget = static_cast<TerminalWidget*>(userdata);
+  if (widget == nullptr) {
+    return;
+  }
+
+  QMetaObject::invokeMethod(
+      widget, [widget, processAlive]() { widget->requestClose(processAlive); },
+      Qt::QueuedConnection);
+}
+
+bool GhosttyApp::handleAction(ghostty_target_s target,
+                              ghostty_action_s action) {
+  TerminalWidget* widget = widgetForTarget(target);
+  if (widget != nullptr) {
+    const std::optional<bool> result = widget->handleAction(action);
+    if (result.has_value()) {
+      return result.value();
+    }
+  }
+
+  MainWindow* window =
+      widget != nullptr
+          ? qobject_cast<MainWindow*>(widget->window())
+          : qobject_cast<MainWindow*>(QApplication::activeWindow());
+  if (target.tag == GHOSTTY_TARGET_SURFACE && window != nullptr) {
+    const std::optional<bool> result = window->handleAction(widget, action);
+    if (result.has_value()) {
+      return result.value();
+    }
+  }
+
+  switch (action.tag) {
+    case GHOSTTY_ACTION_QUIT:
+    case GHOSTTY_ACTION_CLOSE_ALL_WINDOWS: {
+      const QList<MainWindow*> windows = m_windows;
+      for (MainWindow* candidate : windows) {
+        if (candidate != nullptr && !candidate->canClose()) {
+          return false;
+        }
+      }
+      for (MainWindow* candidate : windows) {
+        if (candidate != nullptr) {
+          candidate->closeConfirmed();
+        }
+      }
+      QTimer::singleShot(0, qApp, &QCoreApplication::quit);
+      return true;
+    }
+    case GHOSTTY_ACTION_NEW_TAB:
+      createWindow();
+      return true;
+    case GHOSTTY_ACTION_NEW_WINDOW: {
+      ghostty_surface_config_s config =
+          widget != nullptr
+              ? widget->inheritedConfig(GHOSTTY_SURFACE_CONTEXT_WINDOW)
+              : ghostty_surface_config_new();
+      createWindow(&config);
+      if (widget != nullptr) {
+        widget->freeInheritedConfig(config);
+      }
+      return true;
+    }
+    case GHOSTTY_ACTION_GOTO_WINDOW: {
+      QList<MainWindow*> windows;
+      for (MainWindow* candidate : m_windows) {
+        if (candidate != nullptr && !candidate->isQuickTerminal()) {
+          windows.append(candidate);
+        }
+      }
+      if (windows.size() < 2 || window == nullptr ||
+          window->isQuickTerminal()) {
+        return false;
+      }
+      qsizetype index = windows.indexOf(window);
+      const qsizetype delta =
+          action.action.goto_window == GHOSTTY_GOTO_WINDOW_PREVIOUS ? -1 : 1;
+      index = (index + delta + windows.size()) % windows.size();
+      windows.at(index)->show();
+      windows.at(index)->raise();
+      windows.at(index)->activateWindow();
+      return true;
+    }
+    case GHOSTTY_ACTION_TOGGLE_QUICK_TERMINAL:
+      toggleQuickTerminal();
+      return true;
+    case GHOSTTY_ACTION_TOGGLE_VISIBILITY: {
+      const bool anyVisible = std::any_of(
+          m_windows.cbegin(), m_windows.cend(), [](MainWindow* candidate) {
+            return candidate != nullptr && !candidate->isQuickTerminal() &&
+                   candidate->isVisible();
+          });
+      for (MainWindow* candidate : m_windows) {
+        if (candidate == nullptr || candidate->isQuickTerminal()) {
+          continue;
+        }
+        if (anyVisible) {
+          candidate->hide();
+        } else {
+          candidate->show();
+          candidate->raise();
+        }
+      }
+      return true;
+    }
+    case GHOSTTY_ACTION_RENDER:
+      for (TerminalWidget* surface : m_surfaces) {
+        if (surface != nullptr) {
+          (void)surface->handleAction(action);
+        }
+      }
+      return true;
+    case GHOSTTY_ACTION_DESKTOP_NOTIFICATION: {
+      const auto& notification = action.action.desktop_notification;
+      sendNotification(QString::fromUtf8(notification.title),
+                       QString::fromUtf8(notification.body));
+      return true;
+    }
+    case GHOSTTY_ACTION_TOGGLE_BACKGROUND_OPACITY:
+      return toggleBackgroundOpacity();
+    case GHOSTTY_ACTION_OPEN_CONFIG: {
+      const ghostty_string_s path = ghostty_config_open_path();
+      const QString value =
+          path.ptr == nullptr
+              ? QString()
+              : QString::fromUtf8(path.ptr, static_cast<qsizetype>(path.len));
+      ghostty_string_free(path);
+      if (value.isEmpty()) {
+        return false;
+      }
+      if (action.action.open_config == GHOSTTY_ACTION_OPEN_CONFIG_OS_OPEN) {
+        return QDesktopServices::openUrl(QUrl::fromLocalFile(value));
+      }
+      openConfigInWindow(value);
+      return true;
+    }
+    case GHOSTTY_ACTION_RELOAD_CONFIG:
+      return widget != nullptr
+                 ? reloadConfig(widget, action.action.reload_config.soft)
+                 : reloadConfig(action.action.reload_config.soft);
+    case GHOSTTY_ACTION_CONFIG_CHANGE: {
+      if (target.tag != GHOSTTY_TARGET_APP ||
+          action.action.config_change.config == nullptr) {
+        return false;
+      }
+      ghostty_config_t applied =
+          ghostty_config_clone(action.action.config_change.config);
+      if (applied == nullptr) {
+        return false;
+      }
+      ghostty_config_free(m_config);
+      m_config = applied;
+      applyWindowTheme();
+      if (m_globalShortcuts != nullptr) {
+        m_globalShortcuts->refresh(m_config);
+      }
+      for (MainWindow* candidate : m_windows) {
+        if (candidate != nullptr) {
+          candidate->applyConfig(m_config);
+        }
+      }
+      if (m_quickTerminal != nullptr && m_quickTerminal->isVisible()) {
+        showQuickTerminal(m_quickTerminal,
+                          QuickTerminalSettings::fromConfig(m_config));
+      }
+      return true;
+    }
+    case GHOSTTY_ACTION_QUIT_TIMER:
+      if (action.action.quit_timer == GHOSTTY_QUIT_TIMER_STOP) {
+        m_quitTimer->stop();
+        m_quitDelayRemainingNs = 0;
+        return true;
+      }
+      if (bool quit = true;
+          ghostty_config_get(m_config, &quit, "quit-after-last-window-closed",
+                             std::strlen("quit-after-last-window-closed")) &&
+          !quit) {
+        return true;
+      }
+      m_quitDelayRemainingNs = 0;
+      ghostty_config_get(m_config, &m_quitDelayRemainingNs,
+                         "quit-after-last-window-closed-delay",
+                         std::strlen("quit-after-last-window-closed-delay"));
+      scheduleQuitTimer();
+      return true;
+    case GHOSTTY_ACTION_CHECK_FOR_UPDATES:
+      qWarning() << "Built-in update checks are unavailable on Linux";
+      return false;
+    case GHOSTTY_ACTION_SECURE_INPUT:
+      qWarning() << "Secure keyboard entry is unavailable on Linux";
+      return false;
+    case GHOSTTY_ACTION_SHOW_GTK_INSPECTOR:
+      qWarning() << "The GTK inspector is unavailable in the Qt frontend";
+      return false;
+    case GHOSTTY_ACTION_UNDO:
+    case GHOSTTY_ACTION_REDO:
+      qWarning() << "Structural undo and redo are not supported on Linux";
+      return false;
+    default:
+      qWarning() << "Unhandled Ghostty action tag" << action.tag;
+      return false;
+  }
+}
+
+void GhosttyApp::sendNotification(const QString& title, const QString& body) {
+  QDBusMessage message = QDBusMessage::createMethodCall(
+      QStringLiteral("org.freedesktop.Notifications"),
+      QStringLiteral("/org/freedesktop/Notifications"),
+      QStringLiteral("org.freedesktop.Notifications"),
+      QStringLiteral("Notify"));
+  message << QStringLiteral("Qhostty") << uint(0)
+          << QGuiApplication::desktopFileName() << title << body
+          << QStringList() << QVariantMap() << -1;
+  QDBusConnection::sessionBus().asyncCall(message);
+}
+
+void GhosttyApp::scheduleQuitTimer() {
+  constexpr uint64_t nanosecondsPerMillisecond = 1000000;
+  constexpr uint64_t maximumMilliseconds =
+      static_cast<uint64_t>(std::numeric_limits<int>::max());
+  const uint64_t roundedMilliseconds =
+      m_quitDelayRemainingNs / nanosecondsPerMillisecond +
+      (m_quitDelayRemainingNs % nanosecondsPerMillisecond == 0 ? 0 : 1);
+  const uint64_t chunkMilliseconds =
+      std::min(roundedMilliseconds, maximumMilliseconds);
+  m_quitTimerChunkNs = std::min(m_quitDelayRemainingNs,
+                                chunkMilliseconds * nanosecondsPerMillisecond);
+  m_quitTimer->start(static_cast<int>(chunkMilliseconds));
+}
+
+void GhosttyApp::scheduleTick() {
+  if (m_tickQueued.exchange(true)) {
+    return;
+  }
+
+  QMetaObject::invokeMethod(this, [this]() { tick(); }, Qt::QueuedConnection);
+}
+
+void GhosttyApp::tick() {
+  m_tickQueued.store(false);
+  if (m_app != nullptr) {
+    ghostty_app_tick(m_app);
+  }
+}
+
+void GhosttyApp::applyWindowTheme() {
+#if QT_VERSION >= QT_VERSION_CHECK(6, 8, 0)
+  // As in GTK Ghostty, only light and dark force a color scheme. The
+  // other values follow the desktop.
+  const char* theme = nullptr;
+  ghostty_config_get(m_config, static_cast<void*>(&theme), "window-theme",
+                     std::strlen("window-theme"));
+  Qt::ColorScheme scheme = Qt::ColorScheme::Unknown;
+  if (theme != nullptr && std::strcmp(theme, "light") == 0) {
+    scheme = Qt::ColorScheme::Light;
+  } else if (theme != nullptr && std::strcmp(theme, "dark") == 0) {
+    scheme = Qt::ColorScheme::Dark;
+  }
+  QGuiApplication::styleHints()->setColorScheme(scheme);
+#endif
+}
+
+void GhosttyApp::syncColorScheme() {
+  if (m_app == nullptr) {
+    return;
+  }
+
+  Qt::ColorScheme scheme = QGuiApplication::styleHints()->colorScheme();
+  if (scheme == Qt::ColorScheme::Unknown) {
+    const QColor window = QGuiApplication::palette().color(QPalette::Window);
+    scheme = window.lightness() < 128 ? Qt::ColorScheme::Dark
+                                      : Qt::ColorScheme::Light;
+  }
+  ghostty_app_set_color_scheme(m_app, scheme == Qt::ColorScheme::Dark
+                                          ? GHOSTTY_COLOR_SCHEME_DARK
+                                          : GHOSTTY_COLOR_SCHEME_LIGHT);
+}
+
+TerminalWidget* GhosttyApp::widgetForTarget(ghostty_target_s target) {
+  if (target.tag != GHOSTTY_TARGET_SURFACE ||
+      target.target.surface == nullptr) {
+    return nullptr;
+  }
+
+  return static_cast<TerminalWidget*>(
+      ghostty_surface_userdata(target.target.surface));
+}

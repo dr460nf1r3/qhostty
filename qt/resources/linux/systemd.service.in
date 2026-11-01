@@ -1,0 +1,14 @@
+[Unit]
+Description=Qhostty
+After=graphical-session.target
+After=dbus.socket
+Requires=dbus.socket
+
+[Service]
+Type=notify-reload
+ReloadSignal=SIGUSR2
+BusName=@QHOSTTY_APP_ID@
+ExecStart=@QHOSTTY_EXECUTABLE@ --initial-window=false
+
+[Install]
+WantedBy=graphical-session.target
