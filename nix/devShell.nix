@@ -9,6 +9,8 @@
   flatpak-builder,
   gdb,
   cmake,
+  ninja,
+  kdePackages,
   #, glxinfo # unused
   ncurses,
   nodejs,
@@ -195,6 +197,14 @@ in
         libXi
         libXinerama
         libXrandr
+
+        # Only needed for Qt builds
+        kdePackages.qtbase
+        kdePackages.qttools
+        kdePackages.layer-shell-qt
+        kdePackages.kwindowsystem
+        kdePackages.kglobalaccel
+        ninja
 
         # Only needed for GTK builds
         blueprint-compiler
