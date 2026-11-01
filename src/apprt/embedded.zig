@@ -6,6 +6,7 @@
 
 const std = @import("std");
 const builtin = @import("builtin");
+const build_config = @import("../build_config.zig");
 const assert = @import("../quirks.zig").inlineAssert;
 const Allocator = std.mem.Allocator;
 const objc = @import("objc");
@@ -26,6 +27,8 @@ const String = @import("../main_c.zig").String;
 const log = std.log.scoped(.embedded_window);
 
 pub const resourcesDir = internal_os.resourcesDir;
+pub const pre_exec = @import("embedded_cgroup.zig");
+pub const post_fork = pre_exec;
 
 pub const App = struct {
     /// Because we only expect the embedding API to be used in embedded
@@ -109,6 +112,7 @@ pub const App = struct {
         text: ?[:0]const u8,
         unshifted_codepoint: u32,
         composing: bool,
+        logical_key: input.Key,
 
         /// Convert a libghostty key event into a core key event.
         fn core(self: KeyEvent) ?input.KeyEvent {
@@ -122,11 +126,17 @@ pub const App = struct {
             const physical_key = keycode: for (input.keycodes.entries) |entry| {
                 if (entry.native == self.keycode) break :keycode entry.key;
             } else .unidentified;
+            const key = if (self.logical_key != .unidentified and
+                (physical_key.shouldBeRemappable() or
+                    self.logical_key.shouldBeRemappable()))
+                self.logical_key
+            else
+                physical_key;
 
             // Build our final key event
             return .{
                 .action = self.action,
-                .key = physical_key,
+                .key = key,
                 .mods = self.mods,
                 .consumed_mods = self.consumed_mods,
                 .composing = self.composing,
@@ -382,6 +392,7 @@ pub const App = struct {
 pub const Platform = union(PlatformTag) {
     macos: MacOS,
     ios: IOS,
+    egl: EGL,
 
     // If our build target for libghostty is not darwin then we do
     // not include macos support at all.
@@ -395,6 +406,12 @@ pub const Platform = union(PlatformTag) {
         uiview: objc.Object,
     } else void;
 
+    pub const EGL = if (builtin.target.os.tag == .linux) struct {
+        /// The EGL display of the host. If null, the renderer uses a
+        /// surfaceless display.
+        display: ?*anyopaque,
+    } else void;
+
     // The C ABI compatible version of this union. The tag is expected
     // to be stored elsewhere.
     pub const C = extern union {
@@ -404,6 +421,10 @@ pub const Platform = union(PlatformTag) {
 
         ios: extern struct {
             uiview: ?*anyopaque,
+        },
+
+        egl: extern struct {
+            display: ?*anyopaque,
         },
     };
 
@@ -424,6 +445,10 @@ pub const Platform = union(PlatformTag) {
                     break :ios error.UIViewMustBeSet);
                 break :ios .{ .ios = .{ .uiview = uiview } };
             } else error.UnsupportedPlatform,
+
+            .egl => if (EGL != void) .{ .egl = .{
+                .display = c_platform.egl.display,
+            } } else error.UnsupportedPlatform,
         };
     }
 };
@@ -434,6 +459,7 @@ pub const PlatformTag = enum(c_int) {
 
     macos = 1,
     ios = 2,
+    egl = 3,
 };
 
 pub const EnvVar = extern struct {
@@ -1251,9 +1277,14 @@ pub const Surface = struct {
     }
 
     pub fn renderDeviceOptions(self: *const Surface) !renderer.Device.Options {
-        // The Metal renderer currently does not have any options
-        _ = self;
-        return .{};
+        return switch (build_config.renderer) {
+            // The Metal renderer currently does not have any options
+            .metal => .{},
+            .opengl => switch (self.platform) {
+                .egl => |egl| .{ .display = @ptrCast(egl.display) },
+                else => error.UnsupportedPlatform,
+            },
+        };
     }
 };
 
@@ -1272,10 +1303,12 @@ pub const Inspector = struct {
 
     const Backend = enum {
         metal,
+        opengl,
 
         pub fn deinit(self: Backend) void {
             switch (self) {
                 .metal => if (builtin.target.os.tag.isDarwin()) cimgui.ImGui_ImplMetal_Shutdown(),
+                .opengl => cimgui.ImGui_ImplOpenGL3_Shutdown(),
             }
         }
     };
@@ -1493,7 +1526,7 @@ pub const Inspector = struct {
         }
     }
 
-    fn newFrame(self: *Inspector) !void {
+    pub fn newFrame(self: *Inspector) !void {
         const io: *cimgui.c.ImGuiIO = cimgui.c.ImGui_GetIO();
 
         // Determine our delta time
@@ -1519,6 +1552,7 @@ pub const CAPI = struct {
         text: ?[*:0]const u8,
         unshifted_codepoint: u32,
         composing: bool,
+        logical_key: c_int,
 
         /// Convert to Zig key event.
         fn keyEvent(self: KeyEvent) App.KeyEvent {
@@ -1536,6 +1570,10 @@ pub const CAPI = struct {
                 .text = if (self.text) |ptr| std.mem.sliceTo(ptr, 0) else null,
                 .unshifted_codepoint = self.unshifted_codepoint,
                 .composing = self.composing,
+                .logical_key = std.enums.fromInt(
+                    input.Key,
+                    self.logical_key,
+                ) orelse .unidentified,
             };
         }
     };
