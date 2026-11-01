@@ -1,0 +1,31 @@
+name: Qhostty
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    paths:
+      - '.github/workflows/qhostty.yml'
+      - '.github/actions/qhostty-build/**'
+      - 'include/ghostty.h'
+      - 'include/ghostty_ext.h'
+      - 'pkg/opengl/**'
+      - 'qt/**'
+      - 'src/apprt/embedded.zig'
+      - 'src/build/QhosttyBuild.zig'
+      - 'src/build/SharedDeps.zig'
+      - 'src/qhostty_c.zig'
+      - 'src/renderer/**'
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Build and test
+        uses: ./.github/actions/qhostty-build
