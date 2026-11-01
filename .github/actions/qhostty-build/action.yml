@@ -1,0 +1,67 @@
+name: Build and test Qhostty
+description: Build libghostty and the Qt frontend, then run the tests and checks.
+
+runs:
+  using: composite
+  steps:
+    # Without a version, setup-zig uses minimum_zig_version of build.zig.zon,
+    # so the build follows Zig updates of upstream.
+    - name: Install Zig
+      uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
+
+    - name: Install Qt
+      uses: jurplel/install-qt-action@48d3ad6db93f3627c8ee7a0454bc6f3744f7e730 # v4
+      with:
+        version: 6.8.3
+        cache: true
+        cache-key-prefix: qhostty-qt
+
+    - name: Install build dependencies
+      shell: bash
+      run: |
+        sudo apt-get update
+        sudo apt-get install --yes --no-install-recommends \
+          appstream cmake desktop-file-utils libfontconfig-dev libfreetype-dev \
+          libegl-dev libgl-dev libharfbuzz-dev libwayland-dev libxcb1-dev \
+          libxkbcommon-dev libxkbcommon-x11-dev ninja-build
+
+    - name: Configure
+      shell: bash
+      run: cmake -S qt -B build/qt -G Ninja -DCMAKE_BUILD_TYPE=Debug -DBUILD_TESTING=ON
+
+    - name: Build
+      shell: bash
+      run: cmake --build build/qt --parallel 2
+
+    - name: Test
+      shell: bash
+      run: ctest --test-dir build/qt --output-on-failure
+
+    # A warning only: new upstream types still work as text, and the
+    # daily rebase must not stop for them.
+    - name: Check config schema types
+      shell: bash
+      run: |
+        python3 - build/qt/ghostty/share/qhostty/config-schema.json qt/settings/text-types.txt <<'EOF'
+        import json, sys
+        options = json.load(open(sys.argv[1]))["options"]
+        known = {line.strip() for line in open(sys.argv[2]) if line.strip() and not line.startswith("#")}
+        for option in options:
+            if option["kind"] == "text" and option["type"] not in known:
+                print(f"::warning::Config option {option['key']} has the new type {option['type']}. The settings window shows it as text.")
+        EOF
+
+    - name: Check runtime linkage
+      shell: bash
+      run: |
+        build/qt/qhostty +version
+        ! ldd build/qt/qhostty | grep -E 'libgtk|libadwaita'
+        ldd build/qt/ghostty/lib/ghostty-internal.so | grep 'libfontconfig.so.1'
+        ! nm -D --defined-only build/qt/ghostty/lib/ghostty-internal.so | grep -q ' FcInit$'
+
+    - name: Validate installation metadata
+      shell: bash
+      run: |
+        DESTDIR="$RUNNER_TEMP/qhostty-root" cmake --install build/qt --prefix /usr
+        desktop-file-validate "$RUNNER_TEMP/qhostty-root/usr/share/applications/io.github.dr460nf1r3.qhostty.desktop"
+        appstreamcli validate --no-net "$RUNNER_TEMP/qhostty-root/usr/share/metainfo/io.github.dr460nf1r3.qhostty.metainfo.xml"

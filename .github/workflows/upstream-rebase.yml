@@ -1,0 +1,246 @@
+name: Upstream rebase
+
+# Rebase the fork commits on the main branch of Ghostty each day. main is
+# updated only if the rebase applies and the build and tests pass. Else the
+# result goes to the auto-rebase/failed branch and the run fails.
+#
+# Needs the REBASE_TOKEN secret: a fine-grained token for this repository
+# with "Contents" and "Workflows" write access. The default token cannot push
+# commits that change workflow files, and upstream changes them often.
+
+on:
+  schedule:
+    - cron: '23 4 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: upstream-rebase
+  cancel-in-progress: false
+
+env:
+  UPSTREAM_URL: https://github.com/ghostty-org/ghostty.git
+  UPSTREAM_BRANCH: main
+  FAILED_BRANCH: auto-rebase/failed
+
+jobs:
+  rebase:
+    if: github.repository == 'dr460nf1r3/qhostty'
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check token
+        env:
+          REBASE_TOKEN: ${{ secrets.REBASE_TOKEN }}
+        run: |
+          if [ -z "$REBASE_TOKEN" ]; then
+            echo "::error::Add the REBASE_TOKEN secret. See the top of this workflow."
+            exit 1
+          fi
+
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+          fetch-depth: 0
+          token: ${{ secrets.REBASE_TOKEN }}
+
+      - name: Rebase on upstream
+        id: rebase
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+
+          git remote add upstream "$UPSTREAM_URL"
+          git fetch --no-tags upstream "$UPSTREAM_BRANCH"
+          upstream=$(git rev-parse FETCH_HEAD)
+          old_main=$(git rev-parse HEAD)
+          base=$(git merge-base HEAD "$upstream")
+          echo "old_main=$old_main" >> "$GITHUB_OUTPUT"
+
+          if [ "$base" = "$upstream" ]; then
+            echo "main already contains upstream ${upstream:0:12}." >> "$GITHUB_STEP_SUMMARY"
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "changed=true" >> "$GITHUB_OUTPUT"
+
+          {
+            echo "Upstream: ${upstream:0:12}, $(git rev-list --count "$base..$upstream") new commits."
+            echo "Fork commits: $(git rev-list --count "$base..HEAD")."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          if git rebase --onto "$upstream" "$base"; then
+            echo "Rebase applied without conflicts." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          # Keep the conflict markers in a commit, so that the failed branch
+          # shows what to fix.
+          failed=$(git rev-parse REBASE_HEAD)
+          {
+            echo "Rebase conflict while applying $(git log -1 --format='%h %s' "$failed")."
+            echo
+            echo 'Files with conflicts:'
+            git diff --name-only --diff-filter=U | sed 's/^/- /'
+          } >> "$GITHUB_STEP_SUMMARY"
+          git add -A
+          git commit --no-verify --allow-empty \
+            -m "auto-rebase: conflicts while applying $(git rev-parse --short "$failed")" \
+            -m "$(git log -1 --format='%s' "$failed")"
+          git rebase --quit
+          echo "conflict=true" >> "$GITHUB_OUTPUT"
+          exit 1
+
+      - name: Build and test
+        if: steps.rebase.outputs.changed == 'true'
+        uses: ./.github/actions/qhostty-build
+
+      - name: Push main
+        if: steps.rebase.outputs.changed == 'true'
+        env:
+          OLD_MAIN: ${{ steps.rebase.outputs.old_main }}
+        run: |
+          # The lease fails if main changed during the run. The next run
+          # then rebases the new main.
+          retry() {
+            for delay in 10 30 60 120; do
+              "$@" && return 0
+              echo "::warning::Push failed. Next try in $delay s."
+              sleep "$delay"
+            done
+            "$@"
+          }
+          retry git push --force-with-lease="main:$OLD_MAIN" origin HEAD:main
+          git push origin --delete "$FAILED_BRANCH" 2>/dev/null || true
+          echo "Pushed main $(git rev-parse --short HEAD)." >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Push failed branch
+        if: failure() && steps.rebase.outputs.changed == 'true'
+        run: |
+          for delay in 10 30 60 120 0; do
+            git push --force origin "HEAD:refs/heads/$FAILED_BRANCH" && break
+            [ "$delay" -gt 0 ] || exit 1
+            sleep "$delay"
+          done
+          {
+            echo
+            echo "main is unchanged. The result is in the $FAILED_BRANCH branch."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # Tag each stable upstream release (vX.Y.Z, MIN_TAG or newer) with the
+  # fork commits on top, as <tag>-qhostty, and make a GitHub release. One
+  # tag per run, in release order. Tags older than MIN_TAG are skipped.
+  tag:
+    needs: rebase
+    if: ${{ !cancelled() && github.repository == 'dr460nf1r3/qhostty' }}
+    runs-on: ubuntu-24.04
+    env:
+      MIN_TAG: v1.4.0
+      TAG_SUFFIX: -qhostty
+    steps:
+      - name: Check token
+        env:
+          REBASE_TOKEN: ${{ secrets.REBASE_TOKEN }}
+        run: |
+          if [ -z "$REBASE_TOKEN" ]; then
+            echo "::error::Add the REBASE_TOKEN secret. See the top of this workflow."
+            exit 1
+          fi
+
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+          fetch-depth: 0
+          token: ${{ secrets.REBASE_TOKEN }}
+
+      - name: Apply fork commits on the next upstream tag
+        id: apply
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git fetch --tags --force origin
+          git remote add upstream "$UPSTREAM_URL"
+          git fetch --no-tags upstream \
+            "+refs/heads/$UPSTREAM_BRANCH:refs/remotes/upstream/$UPSTREAM_BRANCH" \
+            '+refs/tags/v*:refs/upstream-tags/v*'
+
+          # The oldest stable upstream tag that has no fork tag yet.
+          next=
+          for tag in $(git for-each-ref --format='%(refname:lstrip=2)' refs/upstream-tags |
+              grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V); do
+            [ "$(printf '%s\n%s\n' "$MIN_TAG" "$tag" | sort -V | head -1)" = "$MIN_TAG" ] || continue
+            git rev-parse -q --verify "refs/tags/$tag$TAG_SUFFIX" >/dev/null && continue
+            next=$tag
+            break
+          done
+          if [ -z "$next" ]; then
+            echo "All upstream tags have a fork tag." >> "$GITHUB_STEP_SUMMARY"
+            echo "tag=" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "tag=$next" >> "$GITHUB_OUTPUT"
+          target=$(git rev-parse "refs/upstream-tags/$next^{commit}")
+
+          # Candidate fork commits: those of the newest fork tag, then those
+          # of main.
+          candidates=()
+          latest=$(git tag -l "v*$TAG_SUFFIX" | sort -V | tail -1)
+          if [ -n "$latest" ]; then
+            candidates+=("refs/upstream-tags/${latest%"$TAG_SUFFIX"}..$latest")
+          fi
+          candidates+=("$(git merge-base main "upstream/$UPSTREAM_BRANCH")..main")
+
+          for range in "${candidates[@]}"; do
+            git checkout -q --detach "$target"
+            if git cherry-pick --allow-empty --keep-redundant-commits "$range"; then
+              echo "Applied the fork commits $range on $next." >> "$GITHUB_STEP_SUMMARY"
+              exit 0
+            fi
+            echo "Conflict with the fork commits $range on $next." >> "$GITHUB_STEP_SUMMARY"
+            git cherry-pick --abort || true
+          done
+          echo "::error::The fork commits do not apply on $next."
+          exit 1
+
+      - name: Build and test
+        if: steps.apply.outputs.tag != ''
+        uses: ./.github/actions/qhostty-build
+
+      - name: Push tag
+        if: steps.apply.outputs.tag != ''
+        env:
+          UPSTREAM_TAG: ${{ steps.apply.outputs.tag }}
+        run: |
+          tag="$UPSTREAM_TAG$TAG_SUFFIX"
+          git tag -a "$tag" -m "Qhostty ${UPSTREAM_TAG#v}" \
+            -m "Ghostty $UPSTREAM_TAG with the Qhostty fork commits."
+          for delay in 10 30 60 120 0; do
+            git push origin "refs/tags/$tag" && break
+            [ "$delay" -gt 0 ] || exit 1
+            sleep "$delay"
+          done
+          echo "Pushed tag $tag." >> "$GITHUB_STEP_SUMMARY"
+
+      # Also makes the releases that an earlier run failed to make.
+      - name: Make missing releases
+        if: ${{ !cancelled() && steps.apply.outcome == 'success' }}
+        env:
+          GH_TOKEN: ${{ secrets.REBASE_TOKEN }}
+          # gh would otherwise use the upstream remote.
+          GH_REPO: ${{ github.repository }}
+        run: |
+          for tag in $(git tag -l "v*$TAG_SUFFIX" | sort -V); do
+            gh release view "$tag" >/dev/null 2>&1 && continue
+            upstream_tag=${tag%"$TAG_SUFFIX"}
+            {
+              echo "Ghostty [$upstream_tag](https://github.com/ghostty-org/ghostty/releases/tag/$upstream_tag) with the Qhostty fork commits:"
+              echo
+              git log --reverse --format='- %s' "refs/upstream-tags/$upstream_tag..$tag"
+            } > "$RUNNER_TEMP/notes.md"
+            gh release create "$tag" --verify-tag \
+              --title "Qhostty ${upstream_tag#v}" --notes-file "$RUNNER_TEMP/notes.md"
+            echo "Made the release $tag." >> "$GITHUB_STEP_SUMMARY"
+          done
