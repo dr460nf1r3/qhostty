@@ -7,6 +7,19 @@
 
 namespace qhostty {
 
+QStringList loadSchemaNames(const QString& list, const QString& path) {
+  QFile file(path);
+  if (!file.open(QIODevice::ReadOnly)) {
+    return {};
+  }
+  QStringList result;
+  for (const QJsonValue& name :
+       QJsonDocument::fromJson(file.readAll()).object().value(list).toArray()) {
+    result.append(name.toString());
+  }
+  return result;
+}
+
 QList<ConfigOption> loadConfigSchema(const QString& path) {
   QFile file(path);
   if (!file.open(QIODevice::ReadOnly)) {
