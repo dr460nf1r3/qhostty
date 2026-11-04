@@ -85,6 +85,53 @@
     </message>
 </context>
 <context>
+    <name>SettingsCategory</name>
+    <message>
+        <source>Fonts</source>
+        <translation>Schriften</translation>
+    </message>
+    <message>
+        <source>Colors and Theme</source>
+        <translation>Farben und Design</translation>
+    </message>
+    <message>
+        <source>Cursor</source>
+        <translation>Cursor</translation>
+    </message>
+    <message>
+        <source>Window</source>
+        <translation>Fenster</translation>
+    </message>
+    <message>
+        <source>Keyboard and Mouse</source>
+        <translation>Tastatur und Maus</translation>
+    </message>
+    <message>
+        <source>Clipboard</source>
+        <translation>Zwischenablage</translation>
+    </message>
+    <message>
+        <source>Shell and Commands</source>
+        <translation>Shell und Befehle</translation>
+    </message>
+    <message>
+        <source>Bell and Notifications</source>
+        <translation>Glocke und Benachrichtigungen</translation>
+    </message>
+    <message>
+        <source>Quick Terminal</source>
+        <translation>Schnellterminal</translation>
+    </message>
+    <message>
+        <source>System</source>
+        <translation>System</translation>
+    </message>
+    <message>
+        <source>Other</source>
+        <translation>Sonstiges</translation>
+    </message>
+</context>
+<context>
     <name>TerminalTab</name>
     <message>
         <source>Terminal</source>
@@ -377,12 +424,90 @@
         <source>Terminal</source>
         <translation>Terminal</translation>
     </message>
+    <message>
+        <source>Settings…</source>
+        <translation>Einstellungen…</translation>
+    </message>
 </context>
 <context>
     <name>WebShortcuts</name>
     <message>
         <source>Search for &apos;%1&apos; with</source>
         <translation>Nach „%1“ suchen mit</translation>
+    </message>
+</context>
+<context>
+    <name>qhostty::OptionEditor</name>
+    <message>
+        <source>Show the documentation</source>
+        <translation>Dokumentation anzeigen</translation>
+    </message>
+    <message>
+        <source>Reset</source>
+        <translation>Zurücksetzen</translation>
+    </message>
+    <message>
+        <source>Reset to the default value</source>
+        <translation>Auf den Standardwert zurücksetzen</translation>
+    </message>
+    <message>
+        <source>One value per line</source>
+        <translation>Ein Wert pro Zeile</translation>
+    </message>
+    <message>
+        <source>(not set)</source>
+        <translation>(nicht gesetzt)</translation>
+    </message>
+    <message>
+        <source>Choose a color</source>
+        <translation>Farbe auswählen</translation>
+    </message>
+    <message>
+        <source>Choose a file</source>
+        <translation>Datei auswählen</translation>
+    </message>
+</context>
+<context>
+    <name>qhostty::SettingsWindow</name>
+    <message>
+        <source>Settings</source>
+        <translation>Einstellungen</translation>
+    </message>
+    <message>
+        <source>Search settings</source>
+        <translation>Einstellungen durchsuchen</translation>
+    </message>
+    <message>
+        <source>Loading the configuration…</source>
+        <translation>Konfiguration wird geladen…</translation>
+    </message>
+    <message>
+        <source>Cannot read the configuration.</source>
+        <translation>Die Konfiguration kann nicht gelesen werden.</translation>
+    </message>
+    <message>
+        <source>Cannot find the configuration file.</source>
+        <translation>Die Konfigurationsdatei wurde nicht gefunden.</translation>
+    </message>
+    <message>
+        <source>Not saved: some settings are not valid.</source>
+        <translation>Nicht gespeichert: Einige Einstellungen sind ungültig.</translation>
+    </message>
+    <message>
+        <source>Cannot write %1: %2</source>
+        <translation>%1 kann nicht geschrieben werden: %2</translation>
+    </message>
+    <message>
+        <source>Saved to %1.</source>
+        <translation>In %1 gespeichert.</translation>
+    </message>
+    <message>
+        <source>Unsaved changes</source>
+        <translation>Ungespeicherte Änderungen</translation>
+    </message>
+    <message>
+        <source>Save the changed settings before closing?</source>
+        <translation>Die geänderten Einstellungen vor dem Schließen speichern?</translation>
     </message>
 </context>
 </TS>
