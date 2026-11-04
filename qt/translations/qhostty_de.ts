@@ -78,6 +78,13 @@
     </message>
 </context>
 <context>
+    <name>Notifications</name>
+    <message>
+        <source>Show Terminal</source>
+        <translation>Terminal anzeigen</translation>
+    </message>
+</context>
+<context>
     <name>TerminalTab</name>
     <message>
         <source>Terminal</source>
@@ -341,6 +348,41 @@
     <message>
         <source>Sequence: %1</source>
         <translation>Sequenz: %1</translation>
+    </message>
+    <message>
+        <source>Activity</source>
+        <translation>Aktivität</translation>
+    </message>
+    <message>
+        <source>New output in %1</source>
+        <translation>Neue Ausgabe in %1</translation>
+    </message>
+    <message>
+        <source>Silence</source>
+        <translation>Stille</translation>
+    </message>
+    <message>
+        <source>No output in %1 for %2 seconds</source>
+        <translation>Keine Ausgabe in %1 seit %2 Sekunden</translation>
+    </message>
+    <message>
+        <source>Monitor for Activity</source>
+        <translation>Auf Aktivität überwachen</translation>
+    </message>
+    <message>
+        <source>Monitor for Silence</source>
+        <translation>Auf Stille überwachen</translation>
+    </message>
+    <message>
+        <source>Terminal</source>
+        <translation>Terminal</translation>
+    </message>
+</context>
+<context>
+    <name>WebShortcuts</name>
+    <message>
+        <source>Search for &apos;%1&apos; with</source>
+        <translation>Nach „%1“ suchen mit</translation>
     </message>
 </context>
 </TS>
