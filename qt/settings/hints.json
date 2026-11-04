@@ -1,0 +1,25 @@
+{
+  "hidden": ["macos-", "gtk-"],
+  "categories": [
+    {"id": "font", "title": "Fonts", "icon": "preferences-desktop-font",
+     "prefixes": ["font-", "adjust-", "alpha-blending", "grapheme-width-method", "freetype-load-flags"]},
+    {"id": "colors", "title": "Colors and Theme", "icon": "preferences-desktop-color",
+     "prefixes": ["theme", "background", "foreground", "palette", "selection-", "cursor-color", "cursor-text", "minimum-contrast", "bold-color", "bold-is-bright", "faint-opacity", "unfocused-split-", "split-divider-color", "search-", "custom-shader"]},
+    {"id": "cursor", "title": "Cursor", "icon": "input-mouse",
+     "prefixes": ["cursor-"]},
+    {"id": "window", "title": "Window", "icon": "window",
+     "prefixes": ["window-", "maximize", "fullscreen", "title", "class", "x11-instance-name", "initial-window", "resize-overlay", "drag-handle", "focus-follows-mouse", "split-", "tab-", "app-notifications", "scrollbar"]},
+    {"id": "input", "title": "Keyboard and Mouse", "icon": "input-keyboard",
+     "prefixes": ["keybind", "mouse-", "click-", "right-click-action", "middle-click-action", "key-remap"]},
+    {"id": "clipboard", "title": "Clipboard", "icon": "edit-paste",
+     "prefixes": ["clipboard-", "copy-on-select", "selection-clear", "selection-word-chars"]},
+    {"id": "shell", "title": "Shell and Commands", "icon": "utilities-terminal",
+     "prefixes": ["command", "initial-command", "input", "shell-integration", "working-directory", "env", "wait-after-command", "abnormal-command-exit-runtime", "scrollback-", "confirm-close-surface", "quit-after-last-window-closed", "term", "enquiry-response", "osc-color-report-format", "vt-", "scroll-to-bottom", "image-storage-limit", "link", "undo-timeout"]},
+    {"id": "notifications", "title": "Bell and Notifications", "icon": "preferences-desktop-notification",
+     "prefixes": ["bell-", "desktop-notifications", "notify-on-command-finish", "progress-style"]},
+    {"id": "quick-terminal", "title": "Quick Terminal", "icon": "view-split-top-bottom",
+     "prefixes": ["quick-terminal-"]},
+    {"id": "linux", "title": "System", "icon": "preferences-system",
+     "prefixes": ["linux-cgroup", "async-backend", "auto-update", "config-", "language"]}
+  ]
+}
