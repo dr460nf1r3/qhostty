@@ -224,6 +224,7 @@ class TerminalWidget final : public QOpenGLWidget {
   QMenu* m_contextMenu = nullptr;
   QAction* m_notifyNextCommandAction = nullptr;
   QPointer<InspectorWindow> m_inspectorWindow;
+  QPointer<QMenu> m_webShortcutsMenu;
   QPoint m_contextMenuPosition;
   bool m_contextMenuPending = false;
   QStringList m_keySequence;
