@@ -8,13 +8,14 @@ set(CMAKE_AUTORCC ON)
 find_package(Qt6 6.5 REQUIRED COMPONENTS Core DBus Gui Network Widgets OpenGL OpenGLWidgets)
 find_package(Qt6 6.5 REQUIRED COMPONENTS LinguistTools)
 find_package(OpenGL REQUIRED COMPONENTS EGL)
-# Key translation needs QKeyMapper from the Qt GUI private API.
-if(NOT TARGET Qt6::GuiPrivate)
-  find_package(Qt6 REQUIRED COMPONENTS GuiPrivate)
-endif()
+option(QHOSTTY_GENERIC_WAYLAND_BLUR
+  "Blur through ext-background-effect-v1 without KDE Frameworks. Uses Qt private API, so the build works only with the exact Qt version it was built with."
+  ON)
 find_package(Qt6 6.5 QUIET COMPONENTS Multimedia)
 find_package(PkgConfig REQUIRED)
-pkg_check_modules(XkbCommon REQUIRED IMPORTED_TARGET xkbcommon)
+pkg_check_modules(XkbCommon REQUIRED IMPORTED_TARGET xkbcommon xkbcommon-x11)
+pkg_check_modules(WaylandClient REQUIRED IMPORTED_TARGET wayland-client)
+pkg_check_modules(Xcb REQUIRED IMPORTED_TARGET xcb)
 find_package(LayerShellQt QUIET)
 find_package(KF6WindowSystem QUIET)
 find_package(KF6GlobalAccel QUIET)
@@ -42,6 +43,8 @@ qt_add_library(qhostty_frontend STATIC
   src/InputCoordinates.h
   src/KeyEventTranslation.cpp
   src/KeyEventTranslation.h
+  src/KeyboardLayout.cpp
+  src/KeyboardLayout.h
   src/GlobalShortcuts.cpp
   src/GlobalShortcuts.h
   src/MainWindow.cpp
@@ -75,8 +78,9 @@ target_link_libraries(qhostty_frontend PUBLIC
   OpenGL::EGL
 )
 target_link_libraries(qhostty_frontend PRIVATE
-  Qt6::GuiPrivate
   PkgConfig::XkbCommon
+  PkgConfig::WaylandClient
+  PkgConfig::Xcb
 )
 if(TARGET Qt6::Multimedia)
   target_link_libraries(qhostty_frontend PRIVATE Qt6::Multimedia)
@@ -96,13 +100,18 @@ endif()
 
 # Background blur goes through KWindowSystem when it is available, because
 # Qt styles such as Kvantum use it too and a surface can have only one blur
-# object. Without it, Qhostty uses ext-background-effect-v1 and the KDE X11
-# blur property directly.
+# object. Without it, Qhostty sets the KDE X11 blur property directly, and
+# uses ext-background-effect-v1 on Wayland only with
+# QHOSTTY_GENERIC_WAYLAND_BLUR.
 if(TARGET KF6::WindowSystem)
   target_sources(qhostty_frontend PRIVATE src/BackgroundBlurKWindowSystem.cpp)
 else()
-  pkg_check_modules(WaylandClient REQUIRED IMPORTED_TARGET wayland-client)
-  pkg_check_modules(Xcb REQUIRED IMPORTED_TARGET xcb)
+  target_sources(qhostty_frontend PRIVATE src/BackgroundBlurX11.cpp)
+endif()
+if(QHOSTTY_GENERIC_WAYLAND_BLUR AND NOT TARGET KF6::WindowSystem)
+  if(NOT TARGET Qt6::GuiPrivate)
+    find_package(Qt6 REQUIRED COMPONENTS GuiPrivate)
+  endif()
   pkg_get_variable(WAYLAND_SCANNER_PATH wayland-scanner wayland_scanner)
   find_program(WAYLAND_SCANNER NAMES wayland-scanner
     HINTS "${WAYLAND_SCANNER_PATH}" REQUIRED)
@@ -129,10 +138,11 @@ else()
   )
   target_include_directories(qhostty_frontend PRIVATE
     "${QHOSTTY_PROTOCOL_DIR}")
-  target_link_libraries(qhostty_frontend PRIVATE
-    PkgConfig::WaylandClient
-    PkgConfig::Xcb
-  )
+  target_link_libraries(qhostty_frontend PRIVATE Qt6::GuiPrivate)
+  target_compile_definitions(qhostty_frontend PRIVATE
+    QHOSTTY_GENERIC_WAYLAND_BLUR=1)
+elseif(QHOSTTY_GENERIC_WAYLAND_BLUR)
+  message(STATUS "QHOSTTY_GENERIC_WAYLAND_BLUR is ignored: KWindowSystem blurs")
 endif()
 if(TARGET KF6::GlobalAccel)
   target_link_libraries(qhostty_frontend PRIVATE KF6::GlobalAccel)
@@ -184,6 +194,8 @@ if(BUILD_TESTING)
     tests/tst_KeyEventTranslation.cpp
     src/KeyEventTranslation.cpp
     src/KeyEventTranslation.h
+    src/KeyboardLayout.cpp
+    src/KeyboardLayout.h
   )
   add_dependencies(qhostty_key_event_translation_test qhostty_libghostty)
   target_include_directories(qhostty_key_event_translation_test PRIVATE
@@ -196,8 +208,10 @@ if(BUILD_TESTING)
   target_link_libraries(qhostty_key_event_translation_test PRIVATE
     Qt6::Core
     Qt6::Gui
-    Qt6::GuiPrivate
     Qt6::Test
+    PkgConfig::XkbCommon
+    PkgConfig::WaylandClient
+    PkgConfig::Xcb
   )
   add_test(NAME qhostty_key_event_translation
     COMMAND qhostty_key_event_translation_test)
