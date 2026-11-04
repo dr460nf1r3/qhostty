@@ -23,7 +23,7 @@
 #include <unistd.h>
 #endif
 
-#include <ghostty.h>
+#include <ghostty_ext.h>
 
 namespace {
 struct AppIdentity {

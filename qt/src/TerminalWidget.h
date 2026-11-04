@@ -6,7 +6,7 @@
 #include <QPointer>
 #include <QStringList>
 
-#include <ghostty.h>
+#include <ghostty_ext.h>
 
 #include <optional>
 
