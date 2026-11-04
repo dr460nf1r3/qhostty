@@ -305,6 +305,8 @@ void TerminalWidget::setupContextMenu() {
   m_contextMenu->addSeparator();
   QMenu* configMenu = m_contextMenu->addMenu(tr("Config"));
   configMenu->setObjectName(QStringLiteral("qhostty-context-config-menu"));
+  connect(configMenu->addAction(tr("Settings…")), &QAction::triggered, this,
+          [this]() { m_app->showSettings(); });
   addBindingAction(configMenu, tr("Open Configuration"),
                    QStringLiteral("open_config"));
   addBindingAction(configMenu, tr("Reload Configuration"),

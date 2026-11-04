@@ -4,6 +4,7 @@
 #include "GlobalShortcuts.h"
 #include "MainWindow.h"
 #include "Notifications.h"
+#include "settings/SettingsWindow.h"
 #include "QuickTerminal.h"
 #include "TerminalTab.h"
 #include "TerminalWidget.h"
@@ -481,8 +482,21 @@ bool GhosttyApp::performBindingAction(const QString& action) {
   return terminal != nullptr && terminal->runBindingAction(action);
 }
 
+void GhosttyApp::showSettings() {
+  if (m_settings == nullptr) {
+    m_settings = new qhostty::SettingsWindow([this]() { reloadConfig(); });
+  }
+  m_settings->show();
+  m_settings->raise();
+  m_settings->activateWindow();
+}
+
 MainWindow* GhosttyApp::activate(const QStringList& arguments,
                                  const QString& workingDirectory) {
+  if (arguments.size() > 1 && arguments.at(1) == QStringLiteral("+settings")) {
+    showSettings();
+    return nullptr;
+  }
   const ActivationOptions options =
       parseActivation(arguments, workingDirectory);
   const QByteArray directory = options.workingDirectory.toUtf8();

@@ -82,7 +82,8 @@ int main(int argc, char** argv) {
   // handlers for these actions do not support embedded apps.
   QString openAction;
   if (argc > 1 && (std::strcmp(argv[1], "+new-window") == 0 ||
-                   std::strcmp(argv[1], "+new-tab") == 0)) {
+                   std::strcmp(argv[1], "+new-tab") == 0 ||
+                   std::strcmp(argv[1], "+settings") == 0)) {
     openAction = QString::fromLatin1(argv[1]);
     for (int index = 1; index < argc; ++index) {
       argv[index] = argv[index + 1];
@@ -200,7 +201,9 @@ int main(int argc, char** argv) {
   bool initialWindow = true;
   ghostty_config_get(ghostty.config(), &initialWindow, "initial-window",
                      std::strlen("initial-window"));
-  if (initialWindow) {
+  if (openAction == QStringLiteral("+settings")) {
+    ghostty.showSettings();
+  } else if (initialWindow) {
     ghostty.createWindow();
   }
   SystemdIntegration::notifyReady();

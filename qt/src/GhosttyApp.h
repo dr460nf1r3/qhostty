@@ -17,6 +17,9 @@ class QMediaPlayer;
 class QMessageBox;
 class QTimer;
 class TerminalWidget;
+namespace qhostty {
+class SettingsWindow;
+}
 
 class GhosttyApp final : public QObject {
   Q_OBJECT
@@ -44,6 +47,7 @@ class GhosttyApp final : public QObject {
   MainWindow* activate(const QStringList& arguments,
                        const QString& workingDirectory);
   void toggleQuickTerminal();
+  void showSettings();
   bool performBindingAction(const QString& action);
   void sendNotification(TerminalWidget* source,
                         const QString& title,
@@ -104,6 +108,7 @@ class GhosttyApp final : public QObject {
   QPointer<MainWindow> m_quickTerminal;
   QSet<TerminalWidget*> m_surfaces;
   Notifications* m_notifications;
+  QPointer<qhostty::SettingsWindow> m_settings;
   std::atomic_bool m_tickQueued = false;
   bool m_backgroundOpaque = false;
   QMediaPlayer* m_soundPlayer = nullptr;
