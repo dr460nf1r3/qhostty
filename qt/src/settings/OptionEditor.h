@@ -11,6 +11,10 @@ class QLabel;
 class QToolButton;
 
 namespace qhostty {
+class ValueEditor;
+}
+
+namespace qhostty {
 
 // One row of the settings window: the name, an editor that fits the kind
 // of the option, a button for the documentation, and a reset button.
@@ -29,6 +33,9 @@ class OptionEditor final : public QWidget {
   void setValues(const QStringList& values);
   void setDefaults(const QStringList& defaults);
   [[nodiscard]] bool isDefault() const;
+  // See ValueEditor::editsFileLines and ValueEditor::setReference.
+  [[nodiscard]] bool editsFileLines() const;
+  void setReference(const QStringList& values);
 
   // Shows an error from validation, or clears it with an empty string.
   void setError(const QString& error);
@@ -49,6 +56,7 @@ class OptionEditor final : public QWidget {
   QLabel* m_error;
   QToolButton* m_reset;
   QWidget* m_editor = nullptr;
+  ValueEditor* m_custom = nullptr;
   std::function<QStringList()> m_get;
   std::function<void(const QStringList&)> m_set;
   bool m_updating = false;

@@ -45,6 +45,10 @@ void ConfigSchemaTest::mapsKinds() {
   QVERIFY(close.values.contains(QStringLiteral("always")));
   QVERIFY(find(options, QStringLiteral("font-family")).repeatable);
   QVERIFY(find(options, QStringLiteral("keybind")).repeatable);
+  QVERIFY(qhostty::loadSchemaNames(QStringLiteral("actions"))
+              .contains(QStringLiteral("new_split")));
+  QVERIFY(qhostty::loadSchemaNames(QStringLiteral("keys"))
+              .contains(QStringLiteral("arrow_left")));
   const auto cursor = find(options, QStringLiteral("cursor-style"));
   QCOMPARE(cursor.kind, QStringLiteral("enum"));
   QVERIFY(cursor.values.contains(QStringLiteral("block")));

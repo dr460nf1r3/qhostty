@@ -1,5 +1,7 @@
 #include "settings/OptionEditor.h"
 
+#include "settings/editors/ValueEditor.h"
+
 #include <QCheckBox>
 #include <QColorDialog>
 #include <QComboBox>
@@ -106,6 +108,14 @@ QWidget* OptionEditor::createEditor() {
       emit edited();
     }
   };
+
+  if (ValueEditor* custom = createValueEditor(m_option, this)) {
+    m_custom = custom;
+    m_get = [custom]() { return custom->values(); };
+    m_set = [custom](const QStringList& values) { custom->setValues(values); };
+    connect(custom, &ValueEditor::changed, this, changed);
+    return custom;
+  }
 
   if (m_option.repeatable) {
     // One value per line. Keybinds and palettes get their own editors
@@ -285,6 +295,16 @@ void OptionEditor::setValues(const QStringList& values) {
 void OptionEditor::setDefaults(const QStringList& defaults) {
   m_defaults = defaults;
   updateState();
+}
+
+bool OptionEditor::editsFileLines() const {
+  return m_custom != nullptr && m_custom->editsFileLines();
+}
+
+void OptionEditor::setReference(const QStringList& values) {
+  if (m_custom != nullptr) {
+    m_custom->setReference(values);
+  }
 }
 
 bool OptionEditor::isDefault() const {
