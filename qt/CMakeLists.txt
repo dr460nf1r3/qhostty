@@ -73,8 +73,16 @@ qt_add_library(qhostty_frontend STATIC
   src/TerminalWidget.h
   src/WebShortcuts.cpp
   src/WebShortcuts.h
+  src/settings/ConfigFile.cpp
+  src/settings/ConfigFile.h
   src/settings/ConfigSchema.cpp
   src/settings/ConfigSchema.h
+  src/settings/ConfigValues.cpp
+  src/settings/ConfigValues.h
+  src/settings/OptionEditor.cpp
+  src/settings/OptionEditor.h
+  src/settings/SettingsWindow.cpp
+  src/settings/SettingsWindow.h
 )
 # The description of all config options, generated from Config.zig.
 set_source_files_properties("${GHOSTTY_CONFIG_SCHEMA}" PROPERTIES
@@ -83,6 +91,10 @@ set_source_files_properties("${GHOSTTY_CONFIG_SCHEMA}" PROPERTIES
 qt_add_resources(qhostty_frontend qhostty_config_schema
   PREFIX /settings
   FILES "${GHOSTTY_CONFIG_SCHEMA}")
+qt_add_resources(qhostty_frontend qhostty_settings_hints
+  PREFIX /settings
+  BASE settings
+  FILES settings/hints.json)
 add_dependencies(qhostty_frontend qhostty_libghostty)
 target_include_directories(qhostty_frontend PUBLIC src)
 target_compile_features(qhostty_frontend PUBLIC cxx_std_20)
@@ -196,6 +208,22 @@ set_target_properties(qhostty PROPERTIES
 include(CTest)
 if(BUILD_TESTING)
   find_package(Qt6 6.5 REQUIRED COMPONENTS Test)
+  qt_add_executable(qhostty_config_file_test
+    tests/tst_ConfigFile.cpp
+    src/settings/ConfigFile.cpp
+    src/settings/ConfigFile.h
+  )
+  target_include_directories(qhostty_config_file_test PRIVATE src)
+  target_compile_features(qhostty_config_file_test PRIVATE cxx_std_20)
+  target_compile_options(qhostty_config_file_test PRIVATE
+    -Wall -Wextra -Wpedantic)
+  target_link_libraries(qhostty_config_file_test PRIVATE
+    Qt6::Core
+    Qt6::Test
+  )
+  add_test(NAME qhostty_config_file
+    COMMAND qhostty_config_file_test)
+
   qt_add_executable(qhostty_config_schema_test
     tests/tst_ConfigSchema.cpp
     src/settings/ConfigSchema.cpp
