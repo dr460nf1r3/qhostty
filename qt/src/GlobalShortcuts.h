@@ -7,7 +7,7 @@
 #include <QObject>
 #include <QVariantMap>
 
-#include <ghostty.h>
+#include <ghostty_ext.h>
 
 class QAction;
 class GhosttyApp;

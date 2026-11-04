@@ -4,7 +4,7 @@
 #include <QList>
 #include <QPointer>
 
-#include <ghostty.h>
+#include <ghostty_ext.h>
 
 class QLabel;
 class QLineEdit;

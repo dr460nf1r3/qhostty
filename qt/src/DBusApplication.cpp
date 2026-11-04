@@ -8,7 +8,7 @@
 #include <QFileInfo>
 #include <QUrl>
 
-#include <ghostty.h>
+#include <ghostty_ext.h>
 
 DBusApplication::DBusApplication(GhosttyApp* app)
     : QDBusAbstractAdaptor(app), m_app(app) {}
