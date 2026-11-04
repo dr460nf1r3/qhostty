@@ -73,7 +73,16 @@ qt_add_library(qhostty_frontend STATIC
   src/TerminalWidget.h
   src/WebShortcuts.cpp
   src/WebShortcuts.h
+  src/settings/ConfigSchema.cpp
+  src/settings/ConfigSchema.h
 )
+# The description of all config options, generated from Config.zig.
+set_source_files_properties("${GHOSTTY_CONFIG_SCHEMA}" PROPERTIES
+  GENERATED TRUE
+  QT_RESOURCE_ALIAS config-schema.json)
+qt_add_resources(qhostty_frontend qhostty_config_schema
+  PREFIX /settings
+  FILES "${GHOSTTY_CONFIG_SCHEMA}")
 add_dependencies(qhostty_frontend qhostty_libghostty)
 target_include_directories(qhostty_frontend PUBLIC src)
 target_compile_features(qhostty_frontend PUBLIC cxx_std_20)
@@ -187,6 +196,26 @@ set_target_properties(qhostty PROPERTIES
 include(CTest)
 if(BUILD_TESTING)
   find_package(Qt6 6.5 REQUIRED COMPONENTS Test)
+  qt_add_executable(qhostty_config_schema_test
+    tests/tst_ConfigSchema.cpp
+    src/settings/ConfigSchema.cpp
+    src/settings/ConfigSchema.h
+  )
+  add_dependencies(qhostty_config_schema_test qhostty_libghostty)
+  qt_add_resources(qhostty_config_schema_test qhostty_test_config_schema
+    PREFIX /settings
+    FILES "${GHOSTTY_CONFIG_SCHEMA}")
+  target_include_directories(qhostty_config_schema_test PRIVATE src)
+  target_compile_features(qhostty_config_schema_test PRIVATE cxx_std_20)
+  target_compile_options(qhostty_config_schema_test PRIVATE
+    -Wall -Wextra -Wpedantic)
+  target_link_libraries(qhostty_config_schema_test PRIVATE
+    Qt6::Core
+    Qt6::Test
+  )
+  add_test(NAME qhostty_config_schema
+    COMMAND qhostty_config_schema_test)
+
   qt_add_executable(qhostty_split_algorithms_test
     tests/tst_SplitAlgorithms.cpp
     src/SplitAlgorithms.cpp
