@@ -45,6 +45,8 @@ qt_add_library(qhostty_frontend STATIC
   src/KeyEventTranslation.h
   src/KeyboardLayout.cpp
   src/KeyboardLayout.h
+  src/Notifications.cpp
+  src/Notifications.h
   src/GlobalShortcuts.cpp
   src/GlobalShortcuts.h
   src/MainWindow.cpp

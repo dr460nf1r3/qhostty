@@ -76,6 +76,9 @@ class TerminalWidget final : public QOpenGLWidget {
   [[nodiscard]] bool bellTitle() const { return m_bellTitle; }
   void setSplitDimmed(bool dimmed);
   void setSplitCount(int count);
+  // Shows this terminal: its window, its tab, and focus.
+  void present();
+
 
  signals:
   void focused();
