@@ -3,12 +3,14 @@
 #include <QByteArray>
 #include <QOpenGLWidget>
 #include <QPoint>
+#include <QRect>
 #include <QPointer>
 #include <QStringList>
 
 #include <ghostty_ext.h>
 
 #include <optional>
+#include <utility>
 
 #include "FramePresenter.h"
 
@@ -80,6 +82,12 @@ class TerminalWidget final : public QOpenGLWidget {
   // Shows this terminal: its window, its tab, and focus.
   void present();
 
+  // Accessibility: the shown text, and offsets into it.
+  [[nodiscard]] QString accessibleText() const;
+  [[nodiscard]] int accessibleCursor() const;
+  [[nodiscard]] std::optional<std::pair<int, int>> accessibleSelection() const;
+  [[nodiscard]] QRect accessibleCharacterRect(int offset) const;
+  [[nodiscard]] int accessibleOffsetAt(const QPoint& position) const;
 
  signals:
   void focused();
@@ -147,6 +155,18 @@ class TerminalWidget final : public QOpenGLWidget {
   void showResizeOverlay();
   void clearBell();
   void updateDragHandle();
+  void updateAccessibleText();
+  // The cell grid in logical pixels, from the cursor position.
+  struct Grid {
+    double cellWidth;
+    double cellHeight;
+    double left;
+    double top;
+    int columns;
+  };
+  [[nodiscard]] std::optional<Grid> grid() const;
+  [[nodiscard]] int offsetOfCell(int row, int column) const;
+  [[nodiscard]] QPoint cellOfOffset(int offset) const;
   void alertOutput(const QString& title, const QString& body);
   [[nodiscard]] QString displayName() const;
   [[nodiscard]] TerminalWidget* draggedSurface(const QMimeData& mime) const;
@@ -186,6 +206,9 @@ class TerminalWidget final : public QOpenGLWidget {
   QTimer* m_resizeOverlayTimer;
   QLabel* m_dragHandle;
   OutputMonitor* m_outputMonitor;
+  QTimer* m_accessibleTimer;
+  mutable QString m_accessibleText;
+  int m_accessibleCursor = -1;
   QWidget* m_dropZone;
   QPoint m_dragHandleStart;
   int m_splitCount = 1;
