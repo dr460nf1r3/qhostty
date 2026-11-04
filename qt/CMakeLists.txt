@@ -19,6 +19,8 @@ pkg_check_modules(Xcb REQUIRED IMPORTED_TARGET xcb)
 find_package(LayerShellQt QUIET)
 find_package(KF6WindowSystem QUIET)
 find_package(KF6GlobalAccel QUIET)
+find_package(KF6KIO QUIET)
+find_package(KF6Config QUIET)
 
 include(cmake/Ghostty.cmake)
 
@@ -69,6 +71,8 @@ qt_add_library(qhostty_frontend STATIC
   src/TerminalText.h
   src/TerminalWidget.cpp
   src/TerminalWidget.h
+  src/WebShortcuts.cpp
+  src/WebShortcuts.h
 )
 add_dependencies(qhostty_frontend qhostty_libghostty)
 target_include_directories(qhostty_frontend PUBLIC src)
@@ -151,6 +155,11 @@ if(QHOSTTY_GENERIC_WAYLAND_BLUR AND NOT TARGET KF6::WindowSystem)
     QHOSTTY_GENERIC_WAYLAND_BLUR=1)
 elseif(QHOSTTY_GENERIC_WAYLAND_BLUR)
   message(STATUS "QHOSTTY_GENERIC_WAYLAND_BLUR is ignored: KWindowSystem blurs")
+endif()
+# KDE web shortcuts in the context menu.
+if(TARGET KF6::KIOGui AND TARGET KF6::ConfigCore)
+  target_link_libraries(qhostty_frontend PRIVATE KF6::KIOGui KF6::ConfigCore)
+  target_compile_definitions(qhostty_frontend PRIVATE QHOSTTY_HAS_KIO=1)
 endif()
 if(TARGET KF6::GlobalAccel)
   target_link_libraries(qhostty_frontend PRIVATE KF6::GlobalAccel)
