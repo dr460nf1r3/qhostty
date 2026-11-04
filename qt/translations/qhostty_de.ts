@@ -437,6 +437,64 @@
     </message>
 </context>
 <context>
+    <name>qhostty::FontFamilyEditor</name>
+    <message>
+        <source>Add Font</source>
+        <translation>Schrift hinzufügen</translation>
+    </message>
+    <message>
+        <source>Fonts after the first are fallbacks for missing characters</source>
+        <translation>Schriften nach der ersten ersetzen fehlende Zeichen</translation>
+    </message>
+    <message>
+        <source>Default font</source>
+        <translation>Standardschrift</translation>
+    </message>
+    <message>
+        <source>Remove this font</source>
+        <translation>Diese Schrift entfernen</translation>
+    </message>
+</context>
+<context>
+    <name>qhostty::KeybindEditor</name>
+    <message>
+        <source>Trigger</source>
+        <translation>Auslöser</translation>
+    </message>
+    <message>
+        <source>Action</source>
+        <translation>Aktion</translation>
+    </message>
+    <message>
+        <source>Add</source>
+        <translation>Hinzufügen</translation>
+    </message>
+    <message>
+        <source>Record Key…</source>
+        <translation>Taste aufnehmen…</translation>
+    </message>
+    <message>
+        <source>Remove</source>
+        <translation>Entfernen</translation>
+    </message>
+    <message>
+        <source>Record Key</source>
+        <translation>Taste aufnehmen</translation>
+    </message>
+    <message>
+        <source>Press the key combination.</source>
+        <translation>Drücken Sie die Tastenkombination.</translation>
+    </message>
+    <message>
+        <source>Use the trigger field for sequences such as ctrl+a&gt;n and for prefixes such as global:.</source>
+        <translation>Für Folgen wie ctrl+a&gt;n und Präfixe wie global: das Auslöserfeld verwenden.</translation>
+    </message>
+    <message>
+        <source>Default Keybinds (%1)</source>
+        <translation>Standard-Tastenkürzel (%1)</translation>
+    </message>
+</context>
+<context>
     <name>qhostty::OptionEditor</name>
     <message>
         <source>Show the documentation</source>
@@ -465,6 +523,21 @@
     <message>
         <source>Choose a file</source>
         <translation>Datei auswählen</translation>
+    </message>
+</context>
+<context>
+    <name>qhostty::PaletteEditor</name>
+    <message>
+        <source>Palette color %1</source>
+        <translation>Palettenfarbe %1</translation>
+    </message>
+    <message>
+        <source>Your color %1. Right-click to remove it.</source>
+        <translation>Ihre Farbe %1. Rechtsklick entfernt sie.</translation>
+    </message>
+    <message>
+        <source>Current color %1</source>
+        <translation>Aktuelle Farbe %1</translation>
     </message>
 </context>
 <context>
@@ -508,6 +581,17 @@
     <message>
         <source>Save the changed settings before closing?</source>
         <translation>Die geänderten Einstellungen vor dem Schließen speichern?</translation>
+    </message>
+</context>
+<context>
+    <name>qhostty::ThemeEditor</name>
+    <message>
+        <source>Use a different theme in dark mode</source>
+        <translation>Im dunklen Modus ein anderes Design verwenden</translation>
+    </message>
+    <message>
+        <source>Light mode</source>
+        <translation>Heller Modus</translation>
     </message>
 </context>
 </TS>
