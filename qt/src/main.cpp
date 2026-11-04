@@ -99,6 +99,9 @@ int main(int argc, char** argv) {
   const AppIdentity identity = readAppIdentity();
   // Qt uses this for the instance name of WM_CLASS on X11.
   qputenv("RESOURCE_NAME", identity.instanceName);
+  // libghostty must not keep the libc environment array, which setenv and
+  // unsetenv change.
+  ghostty_sync_environ();
 
   QCoreApplication::setAttribute(Qt::AA_ShareOpenGLContexts);
 
