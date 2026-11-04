@@ -1,41 +1,22 @@
 #include "KeyEventTranslation.h"
 
 #include <QChar>
-#include <QCoreApplication>
-#include <QGuiApplication>
 #include <QKeyEvent>
 #include <QString>
 
-#include <private/qkeymapper_p.h>
+#include "KeyboardLayout.h"
 
-#include <type_traits>
+#include <xkbcommon/xkbcommon.h>
 
 namespace {
-// Qt 6.7 returns QKeyCombination from QKeyMapper, older versions return int.
-template <typename T>
-int combinedKey(const T& key) {
-  if constexpr (std::is_same_v<T, int>) {
-    return key;
-  } else {
-    return key.toCombined();
-  }
-}
-
-// Returns the key without Shift in the active keyboard layout. key() gives
-// the shifted symbol, for example '"' for Shift+2 on a German layout. The
-// first key from QKeyMapper is the key at the unshifted level.
+// Returns the key without Shift in the active keyboard layout, as a Qt key.
+// key() gives the shifted symbol, for example '"' for Shift+2 on a German
+// layout.
 int baseKey(const QKeyEvent& event) {
-  // QKeyMapper needs the platform integration of a QGuiApplication.
-  if (qobject_cast<QGuiApplication*>(QCoreApplication::instance()) == nullptr) {
-    return event.key();
-  }
-
-  const auto keys = QKeyMapper::possibleKeys(const_cast<QKeyEvent*>(&event));
-  if (!keys.isEmpty()) {
-    const int key = combinedKey(keys.first()) & ~Qt::KeyboardModifierMask;
-    if (key != 0 && key != Qt::Key_unknown) {
-      return key;
-    }
+  const uint32_t codepoint = xkb_keysym_to_utf32(qhostty::baseKeysym(event));
+  if (codepoint >= 0x20 && codepoint != 0x7f) {
+    // Qt keys for letters are upper case.
+    return static_cast<int>(QChar::toUpper(static_cast<char32_t>(codepoint)));
   }
   return event.key();
 }
