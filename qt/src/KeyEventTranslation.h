@@ -2,7 +2,7 @@
 
 #include <QByteArray>
 
-#include <ghostty.h>
+#include <ghostty_ext.h>
 
 #include <cstdint>
 

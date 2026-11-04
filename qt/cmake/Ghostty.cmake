@@ -25,6 +25,7 @@ set(GHOSTTY_SHARED "${GHOSTTY_PREFIX}/lib/ghostty-internal.so")
 set(GHOSTTY_SONAME "${GHOSTTY_PREFIX}/lib/libghostty.so")
 set(GHOSTTY_STATIC "${GHOSTTY_PREFIX}/lib/ghostty-internal.a")
 set(GHOSTTY_HEADER "${GHOSTTY_PREFIX}/include/ghostty.h")
+set(GHOSTTY_EXT_HEADER "${GHOSTTY_PREFIX}/include/ghostty_ext.h")
 
 file(MAKE_DIRECTORY "${GHOSTTY_PREFIX}/include")
 
@@ -52,6 +53,7 @@ add_custom_target(qhostty_libghostty
     "${GHOSTTY_SONAME}"
     "${GHOSTTY_STATIC}"
     "${GHOSTTY_HEADER}"
+    "${GHOSTTY_EXT_HEADER}"
   USES_TERMINAL
   VERBATIM
 )

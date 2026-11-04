@@ -3,7 +3,7 @@
 #include <QRect>
 #include <QString>
 
-#include <ghostty.h>
+#include <ghostty_ext.h>
 
 class MainWindow;
 class QScreen;
