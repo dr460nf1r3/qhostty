@@ -7,6 +7,7 @@
 #include "InspectorWindow.h"
 #include "KeyEventTranslation.h"
 #include "MainWindow.h"
+#include "Notifications.h"
 #include "TerminalTab.h"
 
 #include <QAction>
@@ -1152,6 +1153,7 @@ void TerminalWidget::leaveEvent(QEvent* event) {
 
 void TerminalWidget::focusInEvent(QFocusEvent* event) {
   clearBell();
+  m_app->notifications()->dismiss(this);
   scheduleSurfaceFocus(true);
   emit focused();
   QOpenGLWidget::focusInEvent(event);
@@ -1584,7 +1586,7 @@ void TerminalWidget::commandFinished(
                            : tr("Command took %1 and exited with code %2.")
                                  .arg(elapsed)
                                  .arg(command.exit_code);
-  m_app->sendNotification(title, body);
+  m_app->sendNotification(this, title, body);
 }
 
 void TerminalWidget::updateScrollbar(
@@ -1688,6 +1690,16 @@ void TerminalWidget::clearBell() {
 void TerminalWidget::setSplitDimmed(bool dimmed) {
   m_splitDimmed = dimmed;
   updateSplitDimming();
+}
+
+void TerminalWidget::present() {
+  auto* owner = qobject_cast<MainWindow*>(window());
+  if (owner == nullptr) {
+    return;
+  }
+  ghostty_action_s action{};
+  action.tag = GHOSTTY_ACTION_PRESENT_TERMINAL;
+  (void)owner->handleAction(this, action);
 }
 
 void TerminalWidget::setSplitCount(int count) {
