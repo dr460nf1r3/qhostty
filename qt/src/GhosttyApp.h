@@ -12,6 +12,7 @@
 
 class GlobalShortcuts;
 class MainWindow;
+class Notifications;
 class QMediaPlayer;
 class QMessageBox;
 class QTimer;
@@ -44,7 +45,12 @@ class GhosttyApp final : public QObject {
                        const QString& workingDirectory);
   void toggleQuickTerminal();
   bool performBindingAction(const QString& action);
-  void sendNotification(const QString& title, const QString& body);
+  void sendNotification(TerminalWidget* source,
+                        const QString& title,
+                        const QString& body);
+  [[nodiscard]] Notifications* notifications() const {
+    return m_notifications;
+  }
   void registerWindow(MainWindow* window);
   void unregisterWindow(MainWindow* window);
   void registerSurface(TerminalWidget* widget);
@@ -97,6 +103,7 @@ class GhosttyApp final : public QObject {
   QList<MainWindow*> m_windows;
   QPointer<MainWindow> m_quickTerminal;
   QSet<TerminalWidget*> m_surfaces;
+  Notifications* m_notifications;
   std::atomic_bool m_tickQueued = false;
   bool m_backgroundOpaque = false;
   QMediaPlayer* m_soundPlayer = nullptr;

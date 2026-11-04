@@ -3,6 +3,7 @@
 #include "CgroupScope.h"
 #include "GlobalShortcuts.h"
 #include "MainWindow.h"
+#include "Notifications.h"
 #include "QuickTerminal.h"
 #include "TerminalTab.h"
 #include "TerminalWidget.h"
@@ -166,7 +167,9 @@ ActivationOptions parseActivation(const QStringList& arguments,
 }  // namespace
 
 GhosttyApp::GhosttyApp(QObject* parent)
-    : QObject(parent), m_quitTimer(new QTimer(this)) {
+    : QObject(parent),
+      m_quitTimer(new QTimer(this)),
+      m_notifications(new Notifications(this)) {
   m_quitTimer->setSingleShot(true);
   connect(m_quitTimer, &QTimer::timeout, this, [this]() {
     if (m_quitDelayRemainingNs > m_quitTimerChunkNs) {
@@ -538,6 +541,7 @@ void GhosttyApp::registerSurface(TerminalWidget* widget) {
 
 void GhosttyApp::unregisterSurface(TerminalWidget* widget) {
   m_surfaces.remove(widget);
+  m_notifications->dismiss(widget);
 }
 
 void GhosttyApp::wakeupCallback(void* userdata) {
@@ -701,7 +705,8 @@ bool GhosttyApp::handleAction(ghostty_target_s target,
       return true;
     case GHOSTTY_ACTION_DESKTOP_NOTIFICATION: {
       const auto& notification = action.action.desktop_notification;
-      sendNotification(QString::fromUtf8(notification.title),
+      sendNotification(widgetForTarget(target),
+                       QString::fromUtf8(notification.title),
                        QString::fromUtf8(notification.body));
       return true;
     }
@@ -791,16 +796,10 @@ bool GhosttyApp::handleAction(ghostty_target_s target,
   }
 }
 
-void GhosttyApp::sendNotification(const QString& title, const QString& body) {
-  QDBusMessage message = QDBusMessage::createMethodCall(
-      QStringLiteral("org.freedesktop.Notifications"),
-      QStringLiteral("/org/freedesktop/Notifications"),
-      QStringLiteral("org.freedesktop.Notifications"),
-      QStringLiteral("Notify"));
-  message << QStringLiteral("Qhostty") << uint(0)
-          << QGuiApplication::desktopFileName() << title << body
-          << QStringList() << QVariantMap() << -1;
-  QDBusConnection::sessionBus().asyncCall(message);
+void GhosttyApp::sendNotification(TerminalWidget* source,
+                                  const QString& title,
+                                  const QString& body) {
+  m_notifications->send(source, title, body);
 }
 
 void GhosttyApp::scheduleQuitTimer() {
