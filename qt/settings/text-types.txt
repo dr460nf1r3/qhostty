@@ -1,0 +1,23 @@
+# Config types that the settings window edits as plain text. CI warns when
+# a type that is not in this list maps to text, so that it can get a
+# better editor. One type name per line.
+BackgroundBlur
+BoldColor
+ColorList
+Command
+FontStyle
+Limit
+Modifier
+MouseScrollMultiplier
+QuickTerminalSize
+RemapSet
+RepeatableClipboardCodepointMap
+RepeatableCodepointMap
+RepeatableCommand
+RepeatableFontVariation
+RepeatableLink
+RepeatableReadableIO
+RepeatableStringMap
+SelectionWordChars
+WindowPadding
+WorkingDirectory
