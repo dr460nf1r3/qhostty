@@ -2,7 +2,9 @@
 #include "GhosttyApp.h"
 #include "SingleInstance.h"
 #include "SystemdIntegration.h"
+#include "TerminalAccessible.h"
 
+#include <QAccessible>
 #include <QApplication>
 #include <QCryptographicHash>
 #include <QDebug>
@@ -109,6 +111,7 @@ int main(int argc, char** argv) {
   QSurfaceFormat::setDefaultFormat(format);
 
   QApplication application(argc, argv);
+  QAccessible::installFactory(qhostty::terminalAccessibleFactory);
   QTranslator qtTranslator;
   if (qtTranslator.load(QLocale(), QStringLiteral("qtbase"),
                         QStringLiteral("_"),

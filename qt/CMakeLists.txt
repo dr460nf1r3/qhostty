@@ -63,6 +63,8 @@ qt_add_library(qhostty_frontend STATIC
   src/SystemdIntegration.h
   src/TerminalTab.cpp
   src/TerminalTab.h
+  src/TerminalAccessible.cpp
+  src/TerminalAccessible.h
   src/TerminalText.cpp
   src/TerminalText.h
   src/TerminalWidget.cpp
