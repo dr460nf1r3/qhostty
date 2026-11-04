@@ -10,6 +10,7 @@
 #include "Notifications.h"
 #include "OutputMonitor.h"
 #include "TerminalText.h"
+#include "WebShortcuts.h"
 #include "TerminalTab.h"
 
 #include <QAccessible>
@@ -311,6 +312,12 @@ void TerminalWidget::setupContextMenu() {
 
   connect(m_contextMenu, &QMenu::aboutToHide, this,
           [this]() { setFocus(Qt::PopupFocusReason); });
+  connect(m_contextMenu, &QMenu::aboutToShow, this, [this]() {
+    delete m_webShortcutsMenu;
+    m_webShortcutsMenu = qhostty::addWebShortcuts(
+        m_contextMenu, m_notifyNextCommandAction,
+        qhostty::selectionText(m_surface));
+  });
 }
 
 TerminalWidget::~TerminalWidget() {
