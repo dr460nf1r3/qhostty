@@ -3,7 +3,7 @@
 #include <QMainWindow>
 #include <QPointer>
 
-#include <ghostty.h>
+#include <ghostty_ext.h>
 
 #include <optional>
 

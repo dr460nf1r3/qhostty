@@ -4,7 +4,7 @@
 #include <QOpenGLWidget>
 #include <QPointer>
 
-#include <ghostty.h>
+#include <ghostty_ext.h>
 
 class QFocusEvent;
 class QInputMethodEvent;

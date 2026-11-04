@@ -2,7 +2,7 @@
 
 #include <QSize>
 
-#include <ghostty.h>
+#include <ghostty_ext.h>
 
 class QOpenGLContext;
 

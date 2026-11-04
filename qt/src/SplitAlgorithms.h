@@ -3,7 +3,7 @@
 #include <QList>
 #include <QPoint>
 
-#include <ghostty.h>
+#include <ghostty_ext.h>
 
 namespace qhostty {
 

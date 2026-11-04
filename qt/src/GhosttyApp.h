@@ -8,7 +8,7 @@
 
 #include <atomic>
 
-#include <ghostty.h>
+#include <ghostty_ext.h>
 
 class GlobalShortcuts;
 class MainWindow;

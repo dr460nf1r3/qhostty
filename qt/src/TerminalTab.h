@@ -2,7 +2,7 @@
 
 #include <QWidget>
 
-#include <ghostty.h>
+#include <ghostty_ext.h>
 
 class GhosttyApp;
 class QBoxLayout;

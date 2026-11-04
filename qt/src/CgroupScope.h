@@ -1,6 +1,6 @@
 #pragma once
 
-#include <ghostty.h>
+#include <ghostty_ext.h>
 
 // Lets libghostty move the child process of each terminal into its own
 // transient systemd scope, as the GTK app does. The memory killer can then
