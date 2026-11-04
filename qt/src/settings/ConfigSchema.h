@@ -31,4 +31,10 @@ struct ConfigOption {
 QList<ConfigOption> loadConfigSchema(
     const QString& path = QStringLiteral(":/settings/config-schema.json"));
 
+// Name lists of the schema: "actions" for keybind actions, "keys" for key
+// names.
+QStringList loadSchemaNames(
+    const QString& list,
+    const QString& path = QStringLiteral(":/settings/config-schema.json"));
+
 }  // namespace qhostty

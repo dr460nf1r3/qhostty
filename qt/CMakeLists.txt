@@ -83,6 +83,18 @@ qt_add_library(qhostty_frontend STATIC
   src/settings/OptionEditor.h
   src/settings/SettingsWindow.cpp
   src/settings/SettingsWindow.h
+  src/settings/editors/FontFamilyEditor.cpp
+  src/settings/editors/FontFamilyEditor.h
+  src/settings/editors/KeybindEditor.cpp
+  src/settings/editors/KeybindEditor.h
+  src/settings/editors/KeybindText.cpp
+  src/settings/editors/KeybindText.h
+  src/settings/editors/PaletteEditor.cpp
+  src/settings/editors/PaletteEditor.h
+  src/settings/editors/ThemeEditor.cpp
+  src/settings/editors/ThemeEditor.h
+  src/settings/editors/ValueEditor.cpp
+  src/settings/editors/ValueEditor.h
 )
 # The description of all config options, generated from Config.zig.
 set_source_files_properties("${GHOSTTY_CONFIG_SCHEMA}" PROPERTIES
@@ -208,6 +220,22 @@ set_target_properties(qhostty PROPERTIES
 include(CTest)
 if(BUILD_TESTING)
   find_package(Qt6 6.5 REQUIRED COMPONENTS Test)
+  qt_add_executable(qhostty_keybind_text_test
+    tests/tst_KeybindText.cpp
+    src/settings/editors/KeybindText.cpp
+    src/settings/editors/KeybindText.h
+  )
+  target_include_directories(qhostty_keybind_text_test PRIVATE src)
+  target_compile_features(qhostty_keybind_text_test PRIVATE cxx_std_20)
+  target_compile_options(qhostty_keybind_text_test PRIVATE
+    -Wall -Wextra -Wpedantic)
+  target_link_libraries(qhostty_keybind_text_test PRIVATE
+    Qt6::Core
+    Qt6::Test
+  )
+  add_test(NAME qhostty_keybind_text
+    COMMAND qhostty_keybind_text_test)
+
   qt_add_executable(qhostty_config_file_test
     tests/tst_ConfigFile.cpp
     src/settings/ConfigFile.cpp

@@ -262,10 +262,24 @@ void SettingsWindow::showValues() {
     m_status->setText(tr("Cannot read the configuration."));
     return;
   }
+  QFile source(configPath());
+  const ConfigFile file(source.open(QIODevice::ReadOnly)
+                            ? QString::fromUtf8(source.readAll())
+                            : QString());
   for (auto it = m_editors.cbegin(); it != m_editors.cend(); ++it) {
     OptionEditor* editor = it.value();
-    editor->setDefaults(m_defaults.value(it.key()));
-    editor->setValues(m_current.value(it.key(), m_defaults.value(it.key())));
+    if (editor->editsFileLines()) {
+      // Keybinds and palette colors add to the defaults, so the editor
+      // shows the user's own lines: no lines is the default.
+      editor->setDefaults({});
+      editor->setReference(editor->option().kind == QStringLiteral("keybind")
+                               ? m_defaults.value(it.key())
+                               : m_current.value(it.key()));
+      editor->setValues(file.values(it.key()));
+    } else {
+      editor->setDefaults(m_defaults.value(it.key()));
+      editor->setValues(m_current.value(it.key(), m_defaults.value(it.key())));
+    }
     editor->setEnabled(true);
   }
   m_edited.clear();
