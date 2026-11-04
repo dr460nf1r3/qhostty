@@ -12,6 +12,7 @@
 #include "TerminalText.h"
 #include "TerminalTab.h"
 
+#include <QAccessible>
 #include <QAction>
 #include <QApplication>
 #include <QCheckBox>
@@ -225,6 +226,13 @@ TerminalWidget::TerminalWidget(GhosttyApp* app,
                                    .arg(displayName())
                                    .arg(OutputMonitor::silenceSeconds));
   });
+
+  // Screen readers get text changes at most every 200 ms.
+  m_accessibleTimer = new QTimer(this);
+  m_accessibleTimer->setSingleShot(true);
+  m_accessibleTimer->setInterval(200);
+  connect(m_accessibleTimer, &QTimer::timeout, this,
+          &TerminalWidget::updateAccessibleText);
 
   setupContextMenu();
   m_app->registerSurface(this);
@@ -861,6 +869,10 @@ void TerminalWidget::paintGL() {
     ghostty_surface_report_presentation_health(
         m_surface, GHOSTTY_RENDERER_HEALTH_UNHEALTHY);
     requestFrame();
+  }
+
+  if (QAccessible::isActive() && hasFocus() && !m_accessibleTimer->isActive()) {
+    m_accessibleTimer->start();
   }
 
   const qreal scale = devicePixelRatioF();
@@ -1733,6 +1745,187 @@ void TerminalWidget::alertOutput(const QString& title, const QString& body) {
     return;
   }
   m_app->sendNotification(this, title, body);
+}
+
+QString TerminalWidget::accessibleText() const {
+  if (m_accessibleText.isEmpty()) {
+    m_accessibleText = qhostty::viewportText(m_surface);
+  }
+  return m_accessibleText;
+}
+
+std::optional<TerminalWidget::Grid> TerminalWidget::grid() const {
+  if (m_surface == nullptr) {
+    return std::nullopt;
+  }
+  const ghostty_surface_size_s size = ghostty_surface_size(m_surface);
+  if (size.columns == 0 || size.cell_width_px == 0 ||
+      size.cell_height_px == 0) {
+    return std::nullopt;
+  }
+  const double scale = devicePixelRatioF();
+  const double cellWidth = size.cell_width_px / scale;
+  const double cellHeight = size.cell_height_px / scale;
+  // The cursor point is the middle of the cursor cell in x and its bottom
+  // in y. This gives the padding while it is smaller than a cell.
+  double x = 0;
+  double y = 0;
+  double width = 0;
+  double height = 0;
+  ghostty_surface_ime_point(m_surface, &x, &y, &width, &height);
+  return Grid{
+      .cellWidth = cellWidth,
+      .cellHeight = cellHeight,
+      .left = std::fmod(x - cellWidth / 2, cellWidth),
+      .top = std::fmod(y, cellHeight),
+      .columns = size.columns,
+  };
+}
+
+// The viewport text has one line per logical line. A soft-wrapped line
+// covers more than one row.
+int TerminalWidget::offsetOfCell(int row, int column) const {
+  const std::optional<Grid> cells = grid();
+  const QString text = accessibleText();
+  if (!cells.has_value()) {
+    return 0;
+  }
+  int offset = 0;
+  int firstRow = 0;
+  for (const QStringView line : QStringView(text).split(u'\n')) {
+    const int rows =
+        std::max(1, int((line.size() + cells->columns - 1) / cells->columns));
+    if (row < firstRow + rows) {
+      const int inLine = (row - firstRow) * cells->columns + column;
+      return offset + std::clamp(inLine, 0, int(line.size()));
+    }
+    offset += int(line.size()) + 1;
+    firstRow += rows;
+  }
+  return int(text.size());
+}
+
+QPoint TerminalWidget::cellOfOffset(int offset) const {
+  const std::optional<Grid> cells = grid();
+  if (!cells.has_value()) {
+    return {};
+  }
+  int lineStart = 0;
+  int firstRow = 0;
+  for (const QStringView line : QStringView(accessibleText()).split(u'\n')) {
+    if (offset <= lineStart + line.size()) {
+      const int inLine = offset - lineStart;
+      return {inLine % cells->columns, firstRow + inLine / cells->columns};
+    }
+    firstRow +=
+        std::max(1, int((line.size() + cells->columns - 1) / cells->columns));
+    lineStart += int(line.size()) + 1;
+  }
+  return {0, firstRow};
+}
+
+int TerminalWidget::accessibleCursor() const {
+  const std::optional<Grid> cells = grid();
+  if (!cells.has_value()) {
+    return 0;
+  }
+  double x = 0;
+  double y = 0;
+  double width = 0;
+  double height = 0;
+  ghostty_surface_ime_point(m_surface, &x, &y, &width, &height);
+  const int column = int((x - cells->left) / cells->cellWidth);
+  const int row = int((y - cells->top) / cells->cellHeight) - 1;
+  return offsetOfCell(row, column);
+}
+
+std::optional<std::pair<int, int>> TerminalWidget::accessibleSelection()
+    const {
+  if (m_surface == nullptr || !ghostty_surface_has_selection(m_surface)) {
+    return std::nullopt;
+  }
+  ghostty_text_s text{};
+  if (!ghostty_surface_read_selection(m_surface, &text)) {
+    return std::nullopt;
+  }
+  const uint32_t start = text.offset_start;
+  const uint32_t length = text.offset_len;
+  ghostty_surface_free_text(m_surface, &text);
+
+  // The offsets count cells: row * columns + column.
+  const std::optional<Grid> cells = grid();
+  if (!cells.has_value()) {
+    return std::nullopt;
+  }
+  const auto columns = uint32_t(cells->columns);
+  const uint32_t end = start + length;
+  return std::pair{offsetOfCell(int(start / columns), int(start % columns)),
+                   offsetOfCell(int(end / columns), int(end % columns) + 1)};
+}
+
+QRect TerminalWidget::accessibleCharacterRect(int offset) const {
+  const std::optional<Grid> cells = grid();
+  if (!cells.has_value()) {
+    return {};
+  }
+  const QPoint cell = cellOfOffset(offset);
+  return QRectF(cells->left + cell.x() * cells->cellWidth,
+                cells->top + cell.y() * cells->cellHeight, cells->cellWidth,
+                cells->cellHeight)
+      .toAlignedRect();
+}
+
+int TerminalWidget::accessibleOffsetAt(const QPoint& position) const {
+  const std::optional<Grid> cells = grid();
+  if (!cells.has_value()) {
+    return -1;
+  }
+  const int column = int((position.x() - cells->left) / cells->cellWidth);
+  const int row = int((position.y() - cells->top) / cells->cellHeight);
+  return offsetOfCell(std::max(0, row), std::max(0, column));
+}
+
+// Tells screen readers what changed: only the changed middle part of the
+// text, so they do not read the whole screen again.
+void TerminalWidget::updateAccessibleText() {
+  const QString previous = m_accessibleText;
+  const QString current = qhostty::viewportText(m_surface);
+  m_accessibleText = current;
+  if (previous != current && !previous.isEmpty()) {
+    qsizetype prefix = 0;
+    while (prefix < previous.size() && prefix < current.size() &&
+           previous[prefix] == current[prefix]) {
+      ++prefix;
+    }
+    if (prefix > 0 && prefix < current.size() &&
+        current[prefix].isLowSurrogate()) {
+      --prefix;
+    }
+    qsizetype suffix = 0;
+    while (suffix < previous.size() - prefix &&
+           suffix < current.size() - prefix &&
+           previous[previous.size() - suffix - 1] ==
+               current[current.size() - suffix - 1]) {
+      ++suffix;
+    }
+    if (suffix > 0 && current.size() - suffix > prefix &&
+        current[current.size() - suffix].isLowSurrogate()) {
+      --suffix;
+    }
+    QAccessibleTextUpdateEvent event(
+        this, int(prefix),
+        previous.sliced(prefix, previous.size() - prefix - suffix),
+        current.sliced(prefix, current.size() - prefix - suffix));
+    event.setCursorPosition(accessibleCursor());
+    QAccessible::updateAccessibility(&event);
+  }
+
+  const int cursor = accessibleCursor();
+  if (cursor != m_accessibleCursor) {
+    m_accessibleCursor = cursor;
+    QAccessibleTextCursorEvent event(this, cursor);
+    QAccessible::updateAccessibility(&event);
+  }
 }
 
 void TerminalWidget::setSplitCount(int count) {
