@@ -8,6 +8,8 @@
 #include "KeyEventTranslation.h"
 #include "MainWindow.h"
 #include "Notifications.h"
+#include "OutputMonitor.h"
+#include "TerminalText.h"
 #include "TerminalTab.h"
 
 #include <QAction>
@@ -214,6 +216,16 @@ TerminalWidget::TerminalWidget(GhosttyApp* app,
     runBindingAction(QStringLiteral("scroll_to_row:%1").arg(row));
   });
 
+  m_outputMonitor = new OutputMonitor(this);
+  connect(m_outputMonitor, &OutputMonitor::activity, this, [this]() {
+    alertOutput(tr("Activity"), tr("New output in %1").arg(displayName()));
+  });
+  connect(m_outputMonitor, &OutputMonitor::silence, this, [this]() {
+    alertOutput(tr("Silence"), tr("No output in %1 for %2 seconds")
+                                   .arg(displayName())
+                                   .arg(OutputMonitor::silenceSeconds));
+  });
+
   setupContextMenu();
   m_app->registerSurface(this);
 }
@@ -240,6 +252,14 @@ void TerminalWidget::setupContextMenu() {
   m_notifyNextCommandAction->setObjectName(
       QStringLiteral("qhostty-notify-next-command"));
   m_notifyNextCommandAction->setCheckable(true);
+  QAction* monitorActivity = m_contextMenu->addAction(tr("Monitor for Activity"));
+  monitorActivity->setCheckable(true);
+  connect(monitorActivity, &QAction::toggled, m_outputMonitor,
+          &OutputMonitor::setActivityEnabled);
+  QAction* monitorSilence = m_contextMenu->addAction(tr("Monitor for Silence"));
+  monitorSilence->setCheckable(true);
+  connect(monitorSilence, &QAction::toggled, m_outputMonitor,
+          &OutputMonitor::setSilenceEnabled);
 
   m_contextMenu->addSeparator();
   addBindingAction(m_contextMenu, tr("Clear"), QStringLiteral("clear_screen"));
@@ -1154,6 +1174,7 @@ void TerminalWidget::leaveEvent(QEvent* event) {
 void TerminalWidget::focusInEvent(QFocusEvent* event) {
   clearBell();
   m_app->notifications()->dismiss(this);
+  m_outputMonitor->reset();
   scheduleSurfaceFocus(true);
   emit focused();
   QOpenGLWidget::focusInEvent(event);
@@ -1700,6 +1721,18 @@ void TerminalWidget::present() {
   ghostty_action_s action{};
   action.tag = GHOSTTY_ACTION_PRESENT_TERMINAL;
   (void)owner->handleAction(this, action);
+}
+
+QString TerminalWidget::displayName() const {
+  return m_title.isEmpty() ? tr("Terminal") : m_title;
+}
+
+void TerminalWidget::alertOutput(const QString& title, const QString& body) {
+  if (hasFocus() && window()->isActiveWindow()) {
+    m_outputMonitor->reset();
+    return;
+  }
+  m_app->sendNotification(this, title, body);
 }
 
 void TerminalWidget::setSplitCount(int count) {
