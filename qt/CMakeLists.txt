@@ -47,6 +47,8 @@ qt_add_library(qhostty_frontend STATIC
   src/KeyboardLayout.h
   src/Notifications.cpp
   src/Notifications.h
+  src/OutputMonitor.cpp
+  src/OutputMonitor.h
   src/GlobalShortcuts.cpp
   src/GlobalShortcuts.h
   src/MainWindow.cpp
@@ -61,6 +63,8 @@ qt_add_library(qhostty_frontend STATIC
   src/SystemdIntegration.h
   src/TerminalTab.cpp
   src/TerminalTab.h
+  src/TerminalText.cpp
+  src/TerminalText.h
   src/TerminalWidget.cpp
   src/TerminalWidget.h
 )

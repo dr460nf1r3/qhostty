@@ -36,6 +36,7 @@ class QTimer;
 class QWheelEvent;
 class GhosttyApp;
 class InspectorWindow;
+class OutputMonitor;
 
 class TerminalWidget final : public QOpenGLWidget {
   Q_OBJECT
@@ -146,6 +147,8 @@ class TerminalWidget final : public QOpenGLWidget {
   void showResizeOverlay();
   void clearBell();
   void updateDragHandle();
+  void alertOutput(const QString& title, const QString& body);
+  [[nodiscard]] QString displayName() const;
   [[nodiscard]] TerminalWidget* draggedSurface(const QMimeData& mime) const;
   void showDropZone(const QPointF& position);
   [[nodiscard]] ghostty_action_split_direction_e dropDirection(
@@ -182,6 +185,7 @@ class TerminalWidget final : public QOpenGLWidget {
   QLabel* m_resizeOverlay;
   QTimer* m_resizeOverlayTimer;
   QLabel* m_dragHandle;
+  OutputMonitor* m_outputMonitor;
   QWidget* m_dropZone;
   QPoint m_dragHandleStart;
   int m_splitCount = 1;
